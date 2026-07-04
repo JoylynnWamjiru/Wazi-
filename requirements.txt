@@ -1,6 +1,6 @@
 streamlit
 pymupdf
-sentence-transformers
+fastembed
 faiss-cpu
 anthropic
 python-dotenv

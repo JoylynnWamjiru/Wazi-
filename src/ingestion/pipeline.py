@@ -5,6 +5,7 @@
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -27,6 +28,26 @@ PDF_FILES = [
     "nakuru_audit_report.pdf",
     "nakuru_birr_q2.pdf",
 ]
+
+# --- Value-for-money comparison (one scripted, grounded example) -------------
+VALUE_FOR_MONEY_BENCHMARKS = {
+    "classroom_construction": {
+        "typical_range_kes": (2_000_000, 4_000_000),
+        "unit": "per classroom block",
+        "note": "Illustrative benchmark based on publicly reported public school construction costs in Kenya; used for comparative reasoning only, not a certified cost standard."
+    }
+}
+
+# Query words that signal a value-for-money question (English + Swahili).
+_VFM_TRIGGERS = ("worth", "reasonable", "value for money", "gharama", "thamani")
+
+# Distinctive phrase identifying the specific delayed/incomplete construction
+# finding in the audit report. NOTE: the corpus has no primary-school classroom
+# contract; this is the closest real delayed-and-incomplete building project
+# with a stated contract sum (two dormitories, kitchen, dining area and a shed
+# at Keringet Sports Center, page 15). Swap the marker to target a different
+# project if needed.
+_VFM_PROJECT_MARKER = "two dormitories, kitchen, dining area and a shed"
 
 SYSTEM_PROMPT = """You are Wazi, a civic assistant that helps Kenyan citizens \
 understand their county government's fiscal documents (audit reports and budget \
@@ -52,7 +73,22 @@ the SAME register:
 
 5. CITATION: Always end your reply with a citation line on its own line that \
 names the source document and page, for example:
-   Chanzo: nakuru_birr_q2.pdf, ukurasa 2"""
+   Chanzo: nakuru_birr_q2.pdf, ukurasa 2
+
+6. SOURCE MARKER: After the citation line, add one final line in this exact \
+machine-readable format naming which numbered CONTEXT chunk your answer is \
+based on:
+   USED_CHUNK: <number>
+Use the bracketed number of the chunk you actually drew the answer from. If you \
+did not have enough information to answer, write `USED_CHUNK: none`."""
+
+# Matches the machine-readable marker the model appends, e.g. "USED_CHUNK: 2".
+_USED_CHUNK_RE = re.compile(r"^\s*USED_CHUNK:\s*(\d+|none)\s*$", re.IGNORECASE | re.MULTILINE)
+
+# Matches the model's own in-register citation line (Chanzo/Source/Rejea: ...).
+# The UI renders the derived citation separately, so we strip it from the text
+# to avoid showing the citation twice.
+_CITATION_LINE_RE = re.compile(r"^\s*(chanzo|source|rejea)\s*:.*$", re.IGNORECASE | re.MULTILINE)
 
 
 def build_corpus() -> list[dict]:
@@ -119,6 +155,59 @@ def _generate_deepseek(system_prompt: str, user_content: str) -> str:
     return response.json()["choices"][0]["message"]["content"].strip()
 
 
+def check_value_for_money(query: str) -> dict | None:
+    """One scripted value-for-money comparison, grounded in a real corpus figure.
+
+    If the query contains a value-for-money trigger word, this finds the
+    delayed/incomplete construction project in the audit report, pulls its real
+    contract sum and page, and compares it against the classroom_construction
+    benchmark. Returns a pipeline-shaped dict, or None if not triggered (so
+    normal RAG handling takes over).
+
+    The comparison is always framed as "warrants further clarification" — never
+    as an accusation of wrongdoing. This is a hard requirement.
+    """
+    if not any(trigger in query.lower() for trigger in _VFM_TRIGGERS):
+        return None
+
+    chunks = json.loads((DATA_DIR / "chunks.json").read_text(encoding="utf-8"))
+    chunk = next(
+        (c for c in chunks if _VFM_PROJECT_MARKER.lower() in c["text"].lower()),
+        None,
+    )
+    if chunk is None:
+        return None
+
+    # Pull the contract sum that follows the project marker in the chunk (the
+    # marker anchors us to this project, not another one on the same page).
+    start = chunk["text"].lower().find(_VFM_PROJECT_MARKER.lower())
+    match = re.search(r"contract sum of Kshs[.\s]*([0-9,]+)", chunk["text"][start:])
+    if match is None:
+        return None
+
+    amount = match.group(1)  # e.g. "16,999,852"
+    amount_value = int(amount.replace(",", ""))
+    page = chunk["page"]
+
+    benchmark = VALUE_FOR_MONEY_BENCHMARKS["classroom_construction"]
+    low, high = benchmark["typical_range_kes"]
+    within = low <= amount_value <= high
+    verdict_sw = "kiko ndani ya" if within else "kimezidi"
+
+    text = (
+        f"Kulingana na ripoti ya Mkaguzi Mkuu (ukurasa {page}), mradi huu "
+        f"uligharimu Kshs {amount}. Miradi ya aina hii kwa kawaida hugharimu "
+        f"kati ya Kshs 2,000,000 na 4,000,000 kwa darasa moja. Kiasi hiki "
+        f"{verdict_sw} wigo wa kawaida, na kinahitaji ufafanuzi zaidi."
+    )
+
+    return {
+        "text": text,
+        "citation": f"{chunk['source']}, page {page}",
+        "last_updated": "N/A",
+    }
+
+
 def get_response(query: str) -> dict:
     """Answer a citizen question, grounded in the retrieved corpus chunks.
 
@@ -129,6 +218,11 @@ def get_response(query: str) -> dict:
     based on which API key is present.
     """
     try:
+        # Scripted value-for-money comparison takes precedence over RAG.
+        vfm = check_value_for_money(query)
+        if vfm is not None:
+            return vfm
+
         chunks = retrieve(query, k=4)
         context = "\n\n".join(
             f"[{i + 1}] Source: {c['source']}, page {c['page']}\n{c['text']}"
@@ -137,19 +231,29 @@ def get_response(query: str) -> dict:
         user_content = f"CONTEXT:\n{context}\n\nQUESTION: {query}"
 
         if config.PROVIDER == "anthropic":
-            text = _generate_anthropic(SYSTEM_PROMPT, user_content)
+            raw = _generate_anthropic(SYSTEM_PROMPT, user_content)
         elif config.PROVIDER == "deepseek":
-            text = _generate_deepseek(SYSTEM_PROMPT, user_content)
+            raw = _generate_deepseek(SYSTEM_PROMPT, user_content)
         else:
             raise RuntimeError("No LLM API key configured (Anthropic or DeepSeek)")
 
-        # Citation is taken from the top retrieved chunk's metadata, so it is
-        # always accurate regardless of how the model phrases its own line.
-        if chunks:
+        # The model names the chunk it used via a trailing "USED_CHUNK: N"
+        # marker. Derive the citation from THAT chunk's metadata, then strip the
+        # marker from the user-facing text.
+        match = _USED_CHUNK_RE.search(raw)
+        text = _USED_CHUNK_RE.sub("", raw)
+        text = _CITATION_LINE_RE.sub("", text).strip()
+
+        citation = "N/A"
+        if match and match.group(1).lower() != "none":
+            idx = int(match.group(1)) - 1  # marker is 1-indexed over `chunks`
+            if 0 <= idx < len(chunks):
+                used = chunks[idx]
+                citation = f"{used['source']}, page {used['page']}"
+        elif match is None and chunks:
+            # Model didn't emit a usable marker: fall back to the top chunk.
             top = chunks[0]
             citation = f"{top['source']}, page {top['page']}"
-        else:
-            citation = "N/A"
 
         return {"text": text, "citation": citation, "last_updated": "N/A"}
     except Exception as exc:  # noqa: BLE001 - any failure -> graceful fallback
@@ -186,3 +290,14 @@ if __name__ == "__main__":
         print("  text        :", result["text"])
         print("  citation    :", result["citation"])
         print("  last_updated:", result["last_updated"])
+
+    # Value-for-money scripted comparison (should pull the real contract sum,
+    # stay comparative, and never accuse).
+    vfm_query = "Je, hii shule ilikuwa na thamani ya pesa iliyotumika?"
+    print("\n" + "=" * 72)
+    print(f"[Value-for-money] Q: {vfm_query}")
+    print("\n-- get_response() --")
+    vfm_result = get_response(vfm_query)
+    print("  text        :", vfm_result["text"])
+    print("  citation    :", vfm_result["citation"])
+    print("  last_updated:", vfm_result["last_updated"])
