@@ -1,6 +1,27 @@
-streamlit
-pymupdf
+# Web framework
+fastapi
+uvicorn[standard]
+httpx
+
+# Database
+sqlalchemy
+psycopg2-binary
+pgvector
+
+# AI / ML
 fastembed
-faiss-cpu
 anthropic
 python-dotenv
+
+# Ingestion
+pymupdf
+apscheduler
+requests
+beautifulsoup4
+
+# Admin UI
+streamlit
+
+# Dev / testing
+pytest
+pytest-asyncio

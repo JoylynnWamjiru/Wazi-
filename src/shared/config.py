@@ -1,35 +1,42 @@
-"""Application configuration (loaded from environment variables)."""
+"""Application configuration (loaded from environment variables).
+
+All secrets come from environment variables or a .env file.
+.env is in .gitignore — never commit it.
+"""
 
 import os
 
 from dotenv import load_dotenv
 
-# Load a local .env if present, so ANTHROPIC_API_KEY can live there.
 load_dotenv()
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
-# NOTE: the requested value was "claude-sonnet-4-6", which is not a valid
-# Anthropic model id and would return a 404 (forcing every call into the
-# fallback). Using the current Sonnet id so the pipeline actually runs.
-# Change this line if you need a specific model.
-MODEL_NAME = "claude-sonnet-5"
-
-# DeepSeek (OpenAI-compatible endpoint). Used when no Anthropic key is present
-# but a DeepSeek key is — lets generation run without the Anthropic SDK.
+# --- LLM Provider ---
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-# Pick a provider: prefer Anthropic if its key is set, else fall back to
-# DeepSeek. ("none" means every call will hit FALLBACK_ANSWERS.)
-if ANTHROPIC_API_KEY:
-    PROVIDER = "anthropic"
-elif DEEPSEEK_API_KEY:
-    PROVIDER = "deepseek"
-else:
-    PROVIDER = "none"
+# --- Database ---
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://wazi:wazi_password@localhost:5432/wazi_db",
+)
 
+# --- Africa's Talking ---
+AT_API_KEY = os.getenv("AT_API_KEY")
+AT_USERNAME = os.getenv("AT_USERNAME", "sandbox")
+WA_BOT_NUMBER = os.getenv("WA_BOT_NUMBER")
+
+# --- Identity ---
+ID_SALT = os.getenv("ID_SALT", "dev-salt-change-in-production")
+
+# --- Admin ---
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
+
+# --- Retention ---
+CHAT_RETENTION_DAYS = int(os.getenv("CHAT_RETENTION_DAYS", "90"))
+DISPUTE_RETENTION_DAYS = int(os.getenv("DISPUTE_RETENTION_DAYS", "365"))
+
+# --- Fallback ---
 FALLBACK_ANSWERS = {
     "default": {
         "text": "Samahani, sina jibu la uhakika kwa swali hili sasa hivi.",
