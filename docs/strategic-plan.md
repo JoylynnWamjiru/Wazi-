@@ -319,17 +319,13 @@ Citizen (WhatsApp)
 | **Secure team communication** | Use Signal for sensitive discussions. Don't discuss security incidents in WhatsApp or email. |
 
 ### 8.3 Additional Responsible Computing Metrics
-
-1. **Answer grounding score.** Measure what percentage of generated claims can be verified against the cited chunk using an NLI (natural language inference) model.
-
-2. **Source freshness display.** "This answer is based on the Q2 2025/26 BIRR report, published 3 months ago." Old data is a form of misinformation.
-
-3. **Dispute resolution transparency.** When a dispute is resolved, publish (anonymized) the resolution outcome.
-
-4. **Coverage gaps disclosure.** Publish what the system *cannot* answer: "We currently cover Nakuru County audit reports and BIRR reports. We do not yet cover: county assembly proceedings, project completion certificates, or tender award notices."
-
-5. **Model card.** Publish: what model, what languages, what training data, known limitations, evaluation results from linguist validation.
-
+4. **Coverage gaps disclosure.** Publish exactly which of the 10 CBTS-defined budget
+   documents are in the corpus for each county, e.g.: "Wazi currently covers Nakuru's
+   Q2 Budget Implementation Report and Auditor-General's Report. We do not yet cover
+   the Annual Development Plan, County Fiscal Strategy Paper, Approved Programme-Based
+   Budget, Citizens Budget, Finance Act, Q1/Q3/Q4 Implementation Reports, or the County
+   Budget Review and Outlook Paper." This should be a generated statement, not a
+   hand-written one — see Source model note below.
 ---
 
 ## 9. Target Architecture
@@ -439,6 +435,35 @@ flowchart TD
 5. **Both:** Schedule the threat-modeling session.
 6. **Both:** Schedule the IBP Kenya introductory meeting.
 7. **Both:** Contact peer linguists in the cohort for validation collaboration.
+
+
+### 1.5 Corpus Coverage Gap (confirmed via CBTS research, 2026-07-23)
+
+Kenya's County Budget Transparency Survey (Bajeti Hub, formerly IBP Kenya) evaluates
+counties against 10 legally mandated documents across the budget cycle. Current Wazi
+corpus coverage against this framework:
+
+| Stage | Document | Covered? |
+|---|---|---|
+| Formulation | Annual Development Plan (ADP) | ❌ |
+| Formulation | County Fiscal Strategy Paper (CFSP) | ❌ |
+| Approval | Approved Programme-Based Budget | ❌ |
+| Approval | Citizens Budget / Mwananchi Budget | ❌ |
+| Approval | Finance Act | ❌ |
+| Implementation | Q1 Budget Implementation Report | ❌ |
+| Implementation | Q2 Budget Implementation Report | ✅ (current corpus) |
+| Implementation | Q3 Budget Implementation Report | ❌ |
+| Implementation | Q4 Budget Implementation Report | ❌ |
+| Evaluation | County Budget Review and Outlook Paper (CBROP) | ❌ |
+| *(outside CBTS framework)* | Auditor-General's Report | ✅ (current corpus) |
+
+**Current state: 1 of 10 mandated documents covered, plus 1 supplementary document type.**
+This is not a hidden weakness — it should be surfaced directly to users per the
+Coverage Gaps Disclosure principle (Section 8.3, item 4), and it directly informs
+ingestion priority below.
+
+
+
 
 ---
 
