@@ -10,6 +10,9 @@ from fastapi import FastAPI
 
 from src.shared.database import init_db
 
+# --- Routers ---
+from src.api.webhooks import router as webhook_router
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,6 +27,15 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+# --- Routers ---
+# Webhook is public (no auth — AT sends the request, not a user).
+app.include_router(webhook_router, tags=["whatsapp"])
+
+# Admin API routes (authenticated — added in a future PR).
+# app.include_router(disputes_router, prefix="/api", tags=["disputes"])
+# app.include_router(sources_router, prefix="/api", tags=["sources"])
 
 
 @app.get("/health")
