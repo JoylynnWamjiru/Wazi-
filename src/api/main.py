@@ -12,6 +12,10 @@ from src.shared.database import init_db
 
 # --- Routers ---
 from src.api.webhooks import router as webhook_router
+from src.api.routes.disputes import router as disputes_router
+from src.api.routes.sources import router as sources_router
+from src.api.routes.stats import router as stats_router
+from src.api.routes.sessions import router as sessions_router
 
 
 @asynccontextmanager
@@ -33,9 +37,11 @@ app = FastAPI(
 # Webhook is public (no auth — AT sends the request, not a user).
 app.include_router(webhook_router, tags=["whatsapp"])
 
-# Admin API routes (authenticated — added in a future PR).
-# app.include_router(disputes_router, prefix="/api", tags=["disputes"])
-# app.include_router(sources_router, prefix="/api", tags=["sources"])
+# Admin API routes — all require Bearer token authentication.
+app.include_router(disputes_router, tags=["disputes"])
+app.include_router(sources_router, tags=["sources"])
+app.include_router(stats_router, tags=["stats"])
+app.include_router(sessions_router, tags=["sessions"])
 
 
 @app.get("/health")
