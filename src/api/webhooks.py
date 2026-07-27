@@ -6,16 +6,20 @@ requests to the callback URL configured in the AT dashboard.
 Flow:
     1. AT sends POST with form fields (``from``, ``text``, etc.)
     2. Webhook hashes ``wa_id`` → ``user_id`` immediately
-    3. Finds or creates a User + Session in the database
-    4. Sends an immediate acknowledgment: "Natafuta jibu..."
-    5. Queues the actual pipeline processing as a background task
-    6. Returns 200 OK to AT within ~200ms
+    3. Finds or creates a User + Session; stores the user message
+    4. Commits the session explicitly so the message_id is durable
+       BEFORE the background task fires
+    5. Sends an immediate acknowledgment: "Natafuta jibu..."
+    6. Queues pipeline processing in a thread pool (not the event loop)
+       so synchronous RAG + LLM calls don't block the async server
+    7. Returns 200 OK to AT within ~200ms
 
-The pipeline (retrieval + generation) runs asynchronously.  When it
+The pipeline (retrieval + generation) runs in a thread pool.  When it
 finishes, the answer is sent as a second WhatsApp message.  This means
 the citizen sees two messages: the ack, then the answer.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -55,7 +59,8 @@ async def incoming_message(request: Request, background: BackgroundTasks):
     # Hash the wa_id BEFORE anything else touches it.
     user_id = hash_wa_id(raw_wa_id)
 
-    # Upsert user and create session.
+    # Upsert user and create session.  Commit explicitly BEFORE
+    # queuing the background task so the message_id is durable.
     with get_session() as session:
         user = session.query(User).filter_by(hashed_wa_id=user_id).first()
         if user is None:
@@ -86,6 +91,7 @@ async def incoming_message(request: Request, background: BackgroundTasks):
         session.add(user_msg)
         session.flush()
         message_id = user_msg.id
+        # The context manager commits on exit — message_id is now durable.
 
     # Send immediate acknowledgment.
     await send_whatsapp(
@@ -93,7 +99,8 @@ async def incoming_message(request: Request, background: BackgroundTasks):
         message="Natafuta jibu lako kwenye nyaraka za kaunti... ⏳",
     )
 
-    # Queue the pipeline in the background.
+    # Queue the pipeline in the BACKGROUND — runs in a thread pool so
+    # synchronous RAG + LLM calls don't block the async event loop.
     # The raw_wa_id is captured in the closure and garbage-collected
     # after the task completes — it is never stored or logged.
     background.add_task(
@@ -107,7 +114,11 @@ async def incoming_message(request: Request, background: BackgroundTasks):
 
 
 async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> None:
-    """Run the RAG pipeline and send the answer back to the citizen.
+    """Run the RAG pipeline in a thread pool and send the answer.
+
+    The pipeline (FAISS/pgvector search + DeepSeek HTTP call) is
+    synchronous and blocking — it runs in ``asyncio.to_thread()`` so
+    it doesn't freeze the FastAPI event loop.
 
     The ``raw_phone`` parameter is held ONLY in this function's closure.
     It is never written to the database, logs are masked, and it is
@@ -115,11 +126,8 @@ async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> Non
     """
     answer = None
     try:
-        # TODO: replace this with the refactored pipeline once
-        # orchestrate.py exists.  For now, import the existing one.
-        from src.ingestion.pipeline import get_response
-
-        answer = get_response(query)
+        # Offload the blocking pipeline to a thread pool.
+        answer = await asyncio.to_thread(_run_pipeline, query)
         reply = answer["text"]
         citation = answer.get("citation", "N/A")
 
@@ -132,8 +140,12 @@ async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> Non
 
     # Store the assistant's answer.
     with get_session() as session:
+        msg = session.query(Message).filter_by(id=message_id).first()
+        if msg is None:
+            logger.error("Message %s not found — cannot store answer", message_id)
+            return
         assistant_msg = Message(
-            session_id=_get_session_for_message(session, message_id),
+            session_id=msg.session_id,
             role="assistant",
             text=reply,
             citation=answer.get("citation") if answer else None,
@@ -143,7 +155,11 @@ async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> Non
     await send_whatsapp(phone=raw_phone, message=reply)
 
 
-def _get_session_for_message(session, message_id: int) -> int:
-    """Return the session_id for a given message."""
-    msg = session.query(Message).filter_by(id=message_id).first()
-    return msg.session_id if msg else None
+def _run_pipeline(query: str) -> dict:
+    """Synchronous wrapper around the RAG pipeline.
+
+    Runs in a thread pool via ``asyncio.to_thread()`` so the event loop
+    stays free.  Replace the import once orchestrate.py exists.
+    """
+    from src.ingestion.pipeline import get_response
+    return get_response(query)
