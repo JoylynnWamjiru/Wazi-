@@ -10,6 +10,7 @@ pgvector
 
 # AI / ML
 fastembed
+faiss-cpu  # still required by src/ingestion/embed.py — remove when pgvector migration lands
 anthropic
 python-dotenv
 
