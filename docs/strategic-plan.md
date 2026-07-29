@@ -463,6 +463,54 @@ Coverage Gaps Disclosure principle (Section 8.3, item 4), and it directly inform
 ingestion priority below.
 
 
+### 1.6 Data Integrity Framework
+
+Wazi has two distinct data integrity obligations, governed by two different
+Kenyan laws, requiring two different technical protections:
+
+**Domain A — Citizen/session data integrity** (Data Protection Act, 2019)
+Section 25 requires personal data be "accurate and kept up to date" and
+"processed securely to maintain integrity and confidentiality." Applies to:
+users, messages, disputes tables.
+
+Measures:
+- Dispute status transitions enforced at the DATABASE level (CHECK constraint /
+  native enum), not just API validation — defense in depth against
+  application-layer bugs writing an illegal state
+- Append-only audit log for all moderator actions (dispute resolution,
+  correction sent, source added/edited/deleted) — who, what, when,
+  immutable after write
+- Retention windows (chats 90d, disputes 365d) enforced by a real scheduled
+  job, not left as documented-only policy
+- Hashed wa_id (SHA-256 + salt), disputes table never joinable to identify
+  a specific citizen (unchanged from Week 1 design)
+
+**Domain B — Source document integrity** (Access to Information Act, 2016)
+Section 17 requires public entities keep records that are "accurate,
+authentic, have integrity and useable." Wazi's obligation as a downstream
+consumer of these records is to preserve, not degrade, that integrity.
+
+Measures:
+- SHA-256 checksum computed and stored at ingestion for every source PDF —
+  a verifiable fingerprint against the original government publication
+- Sources are NEVER mutated in place. Superseding a document (e.g., the
+  2026-07-28 BIRR quarter mislabel fix) creates a NEW source record with
+  its own chunks; the old record is marked `superseded_at`, never edited
+  or deleted — preserves full chain of custody and keeps past citations
+  reproducible
+- Source provenance stored alongside each record: origin URL, fetch date,
+  checksum
+- (Roadmap) Scheduled re-verification: periodically re-fetch known source
+  URLs and compare checksums; flag drift for human review, never
+  auto-replace silently — same principle already applied manually to the
+  BIRR fix
+
+> **Implementation status (honest disclosure):** this section is the agreed
+> framework. As of 2026-07-28 the hashed-wa_id measure is implemented; the
+> DB-level transition constraints, audit log, retention job, checksums, and
+> supersede workflow are designed but not yet built — tracked for Weeks 3–5.
+
+
 
 
 ---
