@@ -22,7 +22,7 @@ from src.shared import config
 
 TRUSTED_SOURCES = [
     ("nakuru_audit_report.pdf", "Auditor-General's report, Nakuru County Executive, FY2023/24"),
-    ("nakuru_birr_q2.pdf", "Budget Implementation Review Report, FY2024/25"),
+    ("nakuru_birr_q1.pdf", "Budget Implementation Review Report, Q1 FY2024/25"),
 ]
 DISPUTE_THRESHOLD = 3
 

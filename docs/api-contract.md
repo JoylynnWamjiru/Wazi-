@@ -499,7 +499,7 @@ Returns a random sample of answers that need linguist review.
       "message_id": 42,
       "query_text": "Kaunti ya Nakuru inapokea pesa ngapi kutoka kwa Serikali ya Kitaifa?",
       "answer_text": "Kaunti ya Nakuru inatarajiwa kupokea Kshs 4.2 bilioni...",
-      "citation": "nakuru_birr_q2.pdf, page 3",
+      "citation": "nakuru_birr_q1.pdf, page 3",
       "chunks_used": [
         {
           "chunk_id": 15,

@@ -321,11 +321,13 @@ Citizen (WhatsApp)
 ### 8.3 Additional Responsible Computing Metrics
 4. **Coverage gaps disclosure.** Publish exactly which of the 10 CBTS-defined budget
    documents are in the corpus for each county, e.g.: "Wazi currently covers Nakuru's
-   Q2 Budget Implementation Report and Auditor-General's Report. We do not yet cover
+   Q1 Budget Implementation Report and Auditor-General's Report. We do not yet cover
    the Annual Development Plan, County Fiscal Strategy Paper, Approved Programme-Based
-   Budget, Citizens Budget, Finance Act, Q1/Q3/Q4 Implementation Reports, or the County
+   Budget, Citizens Budget, Finance Act, Q2/Q3/Q4 Implementation Reports, or the County
    Budget Review and Outlook Paper." This should be a generated statement, not a
    hand-written one — see Source model note below.
+   (Corrected 2026-07-28: the corpus BIRR was verified against its cover page —
+   it is the Q1 FY2024/25 edition, previously mislabeled as Q2.)
 ---
 
 ## 9. Target Architecture
@@ -450,8 +452,8 @@ corpus coverage against this framework:
 | Approval | Approved Programme-Based Budget | ❌ |
 | Approval | Citizens Budget / Mwananchi Budget | ❌ |
 | Approval | Finance Act | ❌ |
-| Implementation | Q1 Budget Implementation Report | ❌ |
-| Implementation | Q2 Budget Implementation Report | ✅ (current corpus) |
+| Implementation | Q1 Budget Implementation Report | ✅ (current corpus) |
+| Implementation | Q2 Budget Implementation Report | ❌ |
 | Implementation | Q3 Budget Implementation Report | ❌ |
 | Implementation | Q4 Budget Implementation Report | ❌ |
 | Evaluation | County Budget Review and Outlook Paper (CBROP) | ❌ |
