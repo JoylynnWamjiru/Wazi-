@@ -117,23 +117,6 @@ def build_corpus() -> list[dict]:
     return corpus
 
 
-def _generate_anthropic(system_prompt: str, user_content: str) -> str:
-    """Generate an answer with the Anthropic (Claude) API."""
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    message = client.messages.create(
-        model=config.MODEL_NAME,
-        max_tokens=1024,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_content}],
-    )
-    return "".join(
-        block.text for block in message.content
-        if getattr(block, "type", None) == "text"
-    ).strip()
-
-
 def _generate_deepseek(system_prompt: str, user_content: str) -> str:
     """Generate an answer with DeepSeek's OpenAI-compatible chat endpoint."""
     import httpx
@@ -230,12 +213,9 @@ def get_response(query: str) -> dict:
         )
         user_content = f"CONTEXT:\n{context}\n\nQUESTION: {query}"
 
-        if config.PROVIDER == "anthropic":
-            raw = _generate_anthropic(SYSTEM_PROMPT, user_content)
-        elif config.PROVIDER == "deepseek":
-            raw = _generate_deepseek(SYSTEM_PROMPT, user_content)
-        else:
-            raise RuntimeError("No LLM API key configured (Anthropic or DeepSeek)")
+        if not config.DEEPSEEK_API_KEY:
+            raise RuntimeError("DEEPSEEK_API_KEY is not configured")
+        raw = _generate_deepseek(SYSTEM_PROMPT, user_content)
 
         # The model names the chunk it used via a trailing "USED_CHUNK: N"
         # marker. Derive the citation from THAT chunk's metadata, then strip the
@@ -273,8 +253,7 @@ if __name__ == "__main__":
          "disclosed in the statement of cash flows?"),
     ]
 
-    _model = config.MODEL_NAME if config.PROVIDER == "anthropic" else config.DEEPSEEK_MODEL
-    print(f"Provider: {config.PROVIDER}  |  Model: {_model}")
+    print(f"Provider: deepseek  |  Model: {config.DEEPSEEK_MODEL}")
 
     for label, question in QUESTIONS:
         print("\n" + "=" * 72)
