@@ -464,6 +464,31 @@ This is not a hidden weakness — it should be surfaced directly to users per th
 Coverage Gaps Disclosure principle (Section 8.3, item 4), and it directly informs
 ingestion priority below.
 
+#### Obtaining the missing Q2 FY2024/25 data (verified against CoB, 2026-07-28)
+
+The Controller of Budget publishes no standalone Q2 county report — its
+convention is **cumulative editions**. Q2 performance lives in the *First
+Half* report (July–December 2024). All four FY 2024/25 editions are live at
+https://cob.go.ke/reports/consolidated-county-budget-implementation-review-reports/:
+
+| Edition | Covers | Size |
+|---|---|---|
+| First Quarter FY 2024/25 | Q1 (county-published version already in corpus) | 39.41 MB |
+| **First Half FY 2024/25** | **Q1+Q2 cumulative — the authoritative "Q2" source** | 39.09 MB |
+| First Nine Months FY 2024/25 | Q1–Q3 | 43.29 MB |
+| Annual FY 2024/25 | Full year (supersedes all quarters) | 47.27 MB |
+
+Each is consolidated across all 47 counties, so ingestion requires extracting
+the "COUNTY GOVERNMENT OF NAKURU" section before chunking — exactly the
+extraction pattern the Week-3 scraper (`scripts/seed_db.py` URL strategy) is
+designed for; a manual pass now doubles as a scraper dry run.
+
+**Team decision needed (do not silently substitute):** whether to ingest the
+First Half edition alongside the existing Q1 report, or jump straight to the
+Annual edition (larger, but supersedes all quarters and maximises CBTS
+coverage in one ingestion). Until decided, the coverage table above discloses
+the Q2 gap honestly.
+
 
 
 
