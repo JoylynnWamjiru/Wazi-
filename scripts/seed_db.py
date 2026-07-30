@@ -22,6 +22,11 @@ URL strategy:
         Lists all BIRRs (Q1, Half-Year, Nine-Months, Annual) as individual
         PDFs, each covering all 47 counties.  The scraper extracts only the
         Nakuru section (same heading-search approach).
+
+    KIPPRA pattern: https://repository.kippra.or.ke/handle/123456789/{id}
+        Permanent collection URIs with individual PDFs for each document
+        edition, listed in descending date order.  The scraper downloads the
+        most recent PDF from the collection listing page.
 """
 
 import sys
@@ -51,7 +56,17 @@ OAG_BASE = "https://www.oagkenya.go.ke"
 # All four BIRR editions (Q1, Half-Year, Nine-Months, Annual) are published
 # as individual PDFs on this single page.  Each PDF covers all 47 counties;
 # the scraper extracts only the Nakuru section.
+#
+# KIPPRA repository — permanent collection URIs.
+# Each handle/123456789/{id} lists documents in descending date order.
+# The scraper downloads the most recent PDF from the collection listing.
 # ---------------------------------------------------------------------------
+KIPPRA_BASE = "https://repository.kippra.or.ke/handle/123456789"
+
+# --- KIPPRA ---
+KIPPRA_CBROP = f"{KIPPRA_BASE}/939"
+KIPPRA_BUDGET = f"{KIPPRA_BASE}/935"
+
 COB_BIRR_URL = "https://cob.go.ke/reports/consolidated-county-budget-implementation-review-reports/"
 
 SEED_SOURCES = [
@@ -121,6 +136,26 @@ SEED_SOURCES = [
         "county": "nakuru",
         "report_type": ReportType.BIRR,
         "fiscal_year": "2025/26",
+    },
+    # --- KIPPRA: CBROP (budget vs. actual reconciliation) ---
+    {
+        "url": KIPPRA_CBROP,
+        "title": "Nakuru City County Budget Review and Outlook Paper 2024",
+        "publisher": "County Treasury",
+        "government_arm": GovernmentArm.EXECUTIVE,
+        "county": "nakuru",
+        "report_type": ReportType.CBROP,
+        "fiscal_year": "2024",
+    },
+    # --- KIPPRA: Programme-Based Budget Estimates ---
+    {
+        "url": KIPPRA_BUDGET,
+        "title": "Nakuru City County Approved Budget Estimates 2026/2027",
+        "publisher": "County Treasury",
+        "government_arm": GovernmentArm.EXECUTIVE,
+        "county": "nakuru",
+        "report_type": ReportType.PROGRAMME_BUDGET,
+        "fiscal_year": "2026/27",
     },
 ]
 

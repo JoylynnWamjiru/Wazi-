@@ -42,10 +42,12 @@ class GovernmentArm(str, enum.Enum):
 
 class ReportType(str, enum.Enum):
     """The financial document type."""
-    AUDIT_REPORT = "audit_report"     # OAG annual audit
-    BIRR = "birr"                     # CoB Budget Implementation Review Report
-    EXCHEQUER = "exchequer"           # CoB monthly exchequer releases
-    # Future: CFSP, BUDGET_ESTIMATES, CIDP, PROCUREMENT
+    AUDIT_REPORT = "audit_report"         # OAG annual audit
+    BIRR = "birr"                         # CoB Budget Implementation Review Report
+    EXCHEQUER = "exchequer"               # CoB monthly exchequer releases
+    CBROP = "cbrop"                       # County Budget Review and Outlook Paper (KIPPRA)
+    PROGRAMME_BUDGET = "programme_budget"  # Approved Programme-Based Budget Estimates (KIPPRA)
+    # Future: CFSP, ADP, CITIZENS_BUDGET, CIDP, PROCUREMENT
 
 
 class IngestionStatus(str, enum.Enum):
