@@ -57,7 +57,7 @@ def list_sessions(
         total = query.count()
         rows = (
             query
-            .order_by(Session.created_at.desc())
+            .order_by(msg_stats.c.last_at.desc().nullslast())
             .offset(offset)
             .limit(limit)
             .all()

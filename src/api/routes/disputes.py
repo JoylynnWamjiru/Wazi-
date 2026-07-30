@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/disputes", tags=["disputes"])
 
 
 class DisputeUpdate(BaseModel):
-    dispute_status: str
+    status: str
     resolution_note: str | None = None
     correction_message: str | None = None
     escalation_recipient: str | None = None
@@ -190,7 +190,7 @@ def update_dispute(
     token: str = Depends(verify_admin),
 ) -> dict:
     """Update a dispute's status.  Handles corrections and escalations."""
-    new_status = DisputeStatus(body.dispute_status)
+    new_status = DisputeStatus(body.status)
 
     with get_session() as session:
         dispute = session.query(Dispute).filter_by(id=dispute_id).first()
