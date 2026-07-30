@@ -26,7 +26,7 @@ DATA_DIR = REPO_ROOT / "data"
 
 PDF_FILES = [
     "nakuru_audit_report.pdf",
-    "nakuru_birr_q2.pdf",
+    "nakuru_birr_q1.pdf",  # Q1 FY2024/25 (cover: October 2024) — was mislabeled q2
 ]
 
 # --- Value-for-money comparison (one scripted, grounded example) -------------
@@ -73,7 +73,7 @@ the SAME register:
 
 5. CITATION: Always end your reply with a citation line on its own line that \
 names the source document and page, for example:
-   Chanzo: nakuru_birr_q2.pdf, ukurasa 2
+   Chanzo: nakuru_birr_q1.pdf, ukurasa 2
 
 6. SOURCE MARKER: After the citation line, add one final line in this exact \
 machine-readable format naming which numbered CONTEXT chunk your answer is \

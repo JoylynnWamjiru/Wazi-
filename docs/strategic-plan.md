@@ -321,11 +321,13 @@ Citizen (WhatsApp)
 ### 8.3 Additional Responsible Computing Metrics
 4. **Coverage gaps disclosure.** Publish exactly which of the 10 CBTS-defined budget
    documents are in the corpus for each county, e.g.: "Wazi currently covers Nakuru's
-   Q2 Budget Implementation Report and Auditor-General's Report. We do not yet cover
+   Q1 Budget Implementation Report and Auditor-General's Report. We do not yet cover
    the Annual Development Plan, County Fiscal Strategy Paper, Approved Programme-Based
-   Budget, Citizens Budget, Finance Act, Q1/Q3/Q4 Implementation Reports, or the County
+   Budget, Citizens Budget, Finance Act, Q2/Q3/Q4 Implementation Reports, or the County
    Budget Review and Outlook Paper." This should be a generated statement, not a
    hand-written one — see Source model note below.
+   (Corrected 2026-07-28: the corpus BIRR was verified against its cover page —
+   it is the Q1 FY2024/25 edition, previously mislabeled as Q2.)
 ---
 
 ## 9. Target Architecture
@@ -450,8 +452,8 @@ corpus coverage against this framework:
 | Approval | Approved Programme-Based Budget | ❌ |
 | Approval | Citizens Budget / Mwananchi Budget | ❌ |
 | Approval | Finance Act | ❌ |
-| Implementation | Q1 Budget Implementation Report | ❌ |
-| Implementation | Q2 Budget Implementation Report | ✅ (current corpus) |
+| Implementation | Q1 Budget Implementation Report | ✅ (current corpus) |
+| Implementation | Q2 Budget Implementation Report | ❌ |
 | Implementation | Q3 Budget Implementation Report | ❌ |
 | Implementation | Q4 Budget Implementation Report | ❌ |
 | Evaluation | County Budget Review and Outlook Paper (CBROP) | ❌ |
@@ -461,6 +463,31 @@ corpus coverage against this framework:
 This is not a hidden weakness — it should be surfaced directly to users per the
 Coverage Gaps Disclosure principle (Section 8.3, item 4), and it directly informs
 ingestion priority below.
+
+#### Obtaining the missing Q2 FY2024/25 data (verified against CoB, 2026-07-28)
+
+The Controller of Budget publishes no standalone Q2 county report — its
+convention is **cumulative editions**. Q2 performance lives in the *First
+Half* report (July–December 2024). All four FY 2024/25 editions are live at
+https://cob.go.ke/reports/consolidated-county-budget-implementation-review-reports/:
+
+| Edition | Covers | Size |
+|---|---|---|
+| First Quarter FY 2024/25 | Q1 (county-published version already in corpus) | 39.41 MB |
+| **First Half FY 2024/25** | **Q1+Q2 cumulative — the authoritative "Q2" source** | 39.09 MB |
+| First Nine Months FY 2024/25 | Q1–Q3 | 43.29 MB |
+| Annual FY 2024/25 | Full year (supersedes all quarters) | 47.27 MB |
+
+Each is consolidated across all 47 counties, so ingestion requires extracting
+the "COUNTY GOVERNMENT OF NAKURU" section before chunking — exactly the
+extraction pattern the Week-3 scraper (`scripts/seed_db.py` URL strategy) is
+designed for; a manual pass now doubles as a scraper dry run.
+
+**Team decision needed (do not silently substitute):** whether to ingest the
+First Half edition alongside the existing Q1 report, or jump straight to the
+Annual edition (larger, but supersedes all quarters and maximises CBTS
+coverage in one ingestion). Until decided, the coverage table above discloses
+the Q2 gap honestly.
 
 
 
