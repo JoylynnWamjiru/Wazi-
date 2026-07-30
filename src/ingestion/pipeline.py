@@ -9,19 +9,24 @@ import re
 import sys
 from pathlib import Path
 
-# Put src/ on the path so `shared` and sibling `ingestion.*` modules import
-# cleanly whether run as `python src/ingestion/pipeline.py` or imported.
-SRC_DIR = Path(__file__).resolve().parents[1]  # .../src
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-from ingestion.extract import check_text_layer, extract_pages
-from ingestion.chunk import chunk_pages
-from ingestion.embed import retrieve
-from shared import config
-
 # Repo root is three levels up from this file: src/ingestion/pipeline.py
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Put the REPO ROOT (not src/) on the path so the `src.*` import style below
+# resolves identically whether this module is run as a script or imported by
+# the Streamlit UI / FastAPI app. Every entry point must use the same style:
+# mixing `ingestion.embed` with `src.ingestion.embed` makes Python create two
+# distinct module objects, each loading its own copy of the ONNX embedding
+# model — and the second load fails with "bad allocation", which surfaces to
+# the citizen as the Swahili fallback instead of a real answer.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.ingestion.extract import check_text_layer, extract_pages
+from src.ingestion.chunk import chunk_pages
+from src.ingestion.embed import retrieve
+from src.shared import config
+
 DATA_DIR = REPO_ROOT / "data"
 
 PDF_FILES = [
