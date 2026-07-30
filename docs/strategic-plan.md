@@ -511,6 +511,69 @@ Measures:
 > supersede workflow are designed but not yet built — tracked for Weeks 3–5.
 
 
+### 1.7 Feature Roadmap: Analytics, Guardrails, OCR (brainstormed 2026-07-28)
+
+**1.7.1 Analytics & Onboarding (Week 3 — highest priority, builds on existing patterns)**
+- Query analytics: track frequency of distinct questions (or question categories),
+  surfaced on admin dashboard Overview tab
+- k-anonymity threshold: a question only appears as a "frequent example" once
+  asked by some minimum number of DISTINCT citizens (reuses same threshold
+  principle as dispute anti-bot logic) — protects against a single unusual
+  question becoming a publicly surfaced, re-identifiable prompt
+- Dynamic onboarding: first-time hashed wa_id triggers a help/menu response;
+  existing hardcoded example-question buttons in Streamlit stand-in become
+  data-driven from real analytics instead of static guesses
+- Router pattern: reuses the same trigger-word mechanism as the value-for-money
+  check (msaada/help/menu keywords checked before falling through to RAG)
+
+**1.7.2 Guardrails (Week 4, alongside planned register-drift fix)**
+- Soft guardrails (prompt-level): stay scoped to county fiscal topics, no
+  content about named private individuals' personal matters, no partisan
+  political positioning
+- Hard guardrails (code-level, deterministic): WhatsApp message length cap,
+  output-side keyword filter (checked on the MODEL'S OUTPUT, not just input),
+  rate-limiting
+- Bundled with: known DeepSeek register-drift bug (already flagged Week 4)
+
+**1.7.3 OCR for scanned documents (roadmap, not urgent — no known scanned
+source yet in corpus)**
+- Use Tesseract (local, open-source) as primary — NOT a cloud OCR API
+  (rejected Baidu specifically: routes Kenyan government documents through a
+  foreign cloud service, which cuts against the provenance/sovereignty story
+  built in §1.6; also a fair question for judges to ask)
+- Cloud OCR only as a documented fallback if Tesseract accuracy proves
+  insufficient on a specific bad scan
+
+**1.7.4 Periodic web-search ingestion agent (roadmap, needs human-gate design
+first — do not build ungated)**
+- Schedule checks around KNOWN statutory budget dates (CFSP ~Feb, CBROP
+  ~Sept, budget estimates ~end April, BIRRs ~45 days post-quarter) rather
+  than constant polling
+- Agent PROPOSES candidate documents only; a human curator approves before
+  anything becomes a Source row — preserves the curated-allowlist principle
+  from Day 1; feeds into the same checksum/non-mutation pipeline (§1.6)
+
+**1.7.5 Caching (roadmap, defer infra until post-MVP)**
+- Query-response cache for repeated common questions
+- CRITICAL: cache key must include source/corpus version, not just query
+  text — otherwise a cached answer could serve a citation to a document
+  already superseded per §1.6's non-mutation rule
+- Start in-memory, not Redis — matches current no-local-Docker constraint
+
+**1.7.6 Report-with-proof (near-zero extra work once §1.6 lands)**
+- Escalation reports (already generated for EACC/CoB/OAG per dispute
+  workflow) extended to include the checksum + fetch provenance from §1.6
+  for the specific source document(s) involved
+- Turns an escalation into audit-grade evidence: citizen question, Wazi's
+  answer, the exact retrieved chunk, AND a cryptographic fingerprint proving
+  which unaltered official document it came from
+
+> **Status:** brainstormed backlog, not commitments. Nothing in §1.7 is built
+> yet. Sequencing intent: 1.7.1 in Week 3; 1.7.2 in Week 4 bundled with the
+> register-drift fix; 1.7.3–1.7.5 are post-MVP roadmap; 1.7.6 becomes trivial
+> once §1.6's checksum/provenance work lands, so it rides along with that.
+
+
 
 
 ---
