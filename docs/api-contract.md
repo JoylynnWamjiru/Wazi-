@@ -1,10 +1,12 @@
 # Wazi — API Contract
 
-> Version: 0.2.0
+> Version: 0.2.1
 > Base URL: `http://localhost:8000/api`
 > Auth: Bearer token (set via `ADMIN_PASSWORD` env var)
 >
 > Changelog:
+> - 0.2.1: Documented `cbrop` and `programme_budget` ReportType values added
+>   to `src/shared/models.py` in PR #10 (contract was left stale).
 > - 0.2.0: Added DELETE/PATCH sources, user question + chunks in dispute
 >   detail, correction_message on resolve, session listing, EACC escalation
 >   report generation.
@@ -698,7 +700,7 @@ All errors follow this shape:
 | Enum               | Values                                                                    |
 |--------------------|---------------------------------------------------------------------------|
 | `GovernmentArm`    | `executive`, `assembly`, `consolidated`, `revenue`                        |
-| `ReportType`       | `audit_report`, `birr`, `exchequer`                                       |
+| `ReportType`       | `audit_report`, `birr`, `exchequer`, `cbrop`, `programme_budget`           |
 | `IngestionStatus`  | `pending`, `in_progress`, `completed`, `failed`                           |
 | `DisputeStatus`    | `pending_review`, `under_review`, `resolved_valid`, `resolved_invalid`, `escalated` |
 | `Register`         | `formal_swahili`, `sheng`, `english`                                      |

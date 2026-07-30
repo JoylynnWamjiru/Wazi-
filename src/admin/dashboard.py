@@ -38,6 +38,14 @@ STATUS_BADGES = {
     "escalated": "🔴 escalated",
 }
 
+# Mirror of the GovernmentArm / ReportType enums in src/shared/models.py, which
+# are the source of truth. Duplicated rather than imported because this
+# dashboard talks to the API over HTTP only — importing models.py would drag in
+# SQLAlchemy and pgvector and break the Postgres-free dev flow. Keep these in
+# step with models.py AND docs/api-contract.md §10 when an enum value is added.
+GOVERNMENT_ARMS = ["executive", "assembly", "consolidated", "revenue"]
+REPORT_TYPES = ["audit_report", "birr", "exchequer", "cbrop", "programme_budget"]
+
 st.set_page_config(page_title="Wazi Admin", page_icon="🛡️", layout="wide")
 
 
@@ -317,10 +325,8 @@ with tab_sources:
                 url = st.text_input("Listing page URL")
                 title = st.text_input("Title")
                 publisher = st.text_input("Publisher (e.g. OAG, CoB)")
-                arm = st.selectbox(
-                    "Government arm", ["executive", "assembly", "consolidated", "revenue"]
-                )
-                rtype = st.selectbox("Report type", ["audit_report", "birr", "exchequer"])
+                arm = st.selectbox("Government arm", GOVERNMENT_ARMS)
+                rtype = st.selectbox("Report type", REPORT_TYPES)
                 county = st.text_input("County slug", value="nakuru")
                 fy = st.text_input("Fiscal year (optional, e.g. 2025/26)")
                 create = st.form_submit_button("Register")
