@@ -81,12 +81,23 @@ if "pending_query" not in st.session_state:
 
 @st.cache_resource(show_spinner=False)
 def _warm_pipeline() -> bool:
-    """Load the embedding model + FAISS index once, up front.
+    """Ensure the corpus exists, then load the embedding model + FAISS index.
 
-    Without this, the first question would silently hang ~15s while the model
-    loads. Cached across reruns, so it only happens once per server process.
+    Two jobs, done once per server process (cached across reruns):
+
+    1. Build data/chunks.json if it is missing. It is generated and gitignored,
+       so a fresh deploy (e.g. Streamlit Community Cloud) or clone has the source
+       PDFs but no chunks file; without this the first retrieve() would crash
+       with FileNotFoundError. The PDFs are committed, so build_corpus() can
+       regenerate it deterministically.
+    2. Warm the model so the first real question doesn't hang ~15s while the
+       ONNX model loads.
     """
+    from src.ingestion.pipeline import DATA_DIR, build_corpus
     from src.ingestion.embed import retrieve
+
+    if not (DATA_DIR / "chunks.json").exists():
+        build_corpus()
 
     retrieve("warm up", k=1)
     return True
