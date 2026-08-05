@@ -51,10 +51,10 @@ def retrieve(
                 c.page_number,
                 c.chunk_text,
                 c.government_arm,
-                1 - (c.embedding <=> :embedding) AS similarity
+                1 - (c.embedding <=> CAST(:embedding AS vector)) AS similarity
             FROM chunks c
             WHERE {where_clause}
-            ORDER BY c.embedding <=> :embedding
+            ORDER BY c.embedding <=> CAST(:embedding AS vector)
             LIMIT :k
         """)
 

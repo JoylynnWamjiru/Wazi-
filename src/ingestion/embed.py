@@ -77,6 +77,8 @@ def store_chunks(
             session.add(row)
 
         session.flush()
+        # ``get_session()`` commits on context-manager exit — no explicit
+        # commit() needed here.
 
     return len(chunks)
 

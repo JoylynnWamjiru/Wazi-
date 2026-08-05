@@ -6,9 +6,14 @@ construction benchmarks.
 
 The comparison is ALWAYS framed as "warrants further clarification" —
 never as an accusation of wrongdoing.
+
+Uses ``generate.parse_response()`` to strip the machine-readable
+USED_CHUNK marker and citation line from the citizen-facing text,
+the same way the main RAG pipeline does.
 """
 
 from src.ingestion.retrieve import retrieve
+from src.ingestion.generate import parse_response
 from src.shared import config
 
 _VFM_SYSTEM_PROMPT = """You are a comparative reasoning assistant for Kenyan \
@@ -23,8 +28,8 @@ type in Kenya.
 3. Frame the comparison as "the stated amount is within/outside typical ranges \
 and warrants further clarification" — NEVER accuse anyone of wrongdoing.
 4. Reply in Swahili or Sheng if the query is in that register.
-5. Format: answer on one line, then a "Chanzo:" citation line, then \
-"USED_CHUNK: <number>" on the final line."""
+5. Keep the answer short — WhatsApp-friendly.  Do NOT add Chanzo or USED_CHUNK
+markers (the system adds those automatically)."""
 
 # Trigger words that signal a value-for-money question.
 _VFM_TRIGGERS = (
@@ -69,13 +74,10 @@ def check_value_for_money(query: str) -> dict | None:
             timeout=60.0,
         )
         response.raise_for_status()
-        text = response.json()["choices"][0]["message"]["content"].strip()
+        raw = response.json()["choices"][0]["message"]["content"].strip()
 
-        citation = "N/A"
-        if chunks:
-            c = chunks[0]
-            citation = f"source {c['source_id']}, page {c['page_number']}"
-
-        return {"text": text, "citation": citation, "last_updated": "N/A"}
+        # Reuse the same parsing logic as the main RAG pipeline — strips
+        # USED_CHUNK markers and derives the citation from chunk metadata.
+        return parse_response(raw, chunks)
     except Exception:
         return None

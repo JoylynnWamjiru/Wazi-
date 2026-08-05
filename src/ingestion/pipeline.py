@@ -36,12 +36,13 @@ def build_corpus() -> list[dict]:
     """Build the combined chunk corpus from the Nakuru county PDFs.
 
     Extracts -> chunks -> writes chunks.json for backward compat with the
-    Streamlit citizen chat app.  Chunks are also stored in pgvector via
-    ``embed.store_chunks()``.
-    """
-    from src.ingestion.embed import store_chunks
-    from src.shared.models import GovernmentArm
+    Streamlit citizen chat app (which reads from the JSON file, not pgvector).
 
+    pgvector storage is handled by the scraper (``src/ingestion/scraper.py``)
+    which maps each PDF to a real source_id from the ``sources`` table.
+    ``build_corpus()`` is a local-only convenience that does NOT require
+    PostgreSQL.
+    """
     pdf_paths = [DATA_DIR / name for name in PDF_FILES]
 
     for path in pdf_paths:
@@ -59,24 +60,15 @@ def build_corpus() -> list[dict]:
         chunks = chunk_pages(pages)
         all_chunks.extend(chunks)
 
-    # Write chunks.json for Streamlit citizen chat app backward compat.
+    # Write chunks.json for Streamlit citizen chat app.
     out_path = DATA_DIR / "chunks.json"
     out_path.write_text(
         json.dumps(all_chunks, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
 
-    # Store in pgvector (requires PostgreSQL running).
-    try:
-        stored = store_chunks(
-            all_chunks,
-            source_id=0,
-            government_arm=GovernmentArm.EXECUTIVE,
-            county="nakuru",
-        )
-        print(f"build_corpus: {len(all_chunks)} chunks in json, {stored} in pgvector")
-    except Exception as exc:
-        print(f"build_corpus: {len(all_chunks)} chunks in json, pgvector skipped ({exc})")
+    print(f"build_corpus: {len(all_chunks)} chunks written to chunks.json")
+    print("pgvector storage: deferred to scraper (needs source_id from sources table)")
 
     return all_chunks
 
