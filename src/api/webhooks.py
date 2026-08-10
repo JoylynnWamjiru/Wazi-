@@ -159,7 +159,8 @@ def _run_pipeline(query: str) -> dict:
     """Synchronous wrapper around the RAG pipeline.
 
     Runs in a thread pool via ``asyncio.to_thread()`` so the event loop
-    stays free.  Replace the import once orchestrate.py exists.
+    stays free.  Imports ``orchestrate.get_response`` directly — the clean
+    entry point that ties pgvector retrieval + DeepSeek generation.
     """
-    from src.ingestion.pipeline import get_response
+    from src.ingestion.orchestrate import get_response
     return get_response(query)

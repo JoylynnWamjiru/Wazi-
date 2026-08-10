@@ -30,7 +30,9 @@ def get_response(query: str) -> dict:
         if vfm is not None:
             return vfm
 
-        chunks = retrieve(query, k=4)
+        # k=8: the pending-bills answer lives in a chunk that ranks ~#8;
+        # at k=4 it was a false negative. Verified on the old pipeline.
+        chunks = retrieve(query, k=8)
         raw = generate(chunks, query)
         return parse_response(raw, chunks)
 
