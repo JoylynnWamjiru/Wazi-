@@ -1,0 +1,52 @@
+name: tests
+
+# Runs the pytest suite on every push to main and every pull request.
+# The DB-backed tests use an in-memory SQLite database (tests/conftest.py),
+# so no PostgreSQL service is needed. Tests marked `pgvector` (real Postgres,
+# VPS-only) are excluded here via `-m "not pgvector"`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+      - name: Run test suite (SQLite fixture, no Postgres)
+        env:
+          # conftest.py also sets this, but be explicit so nothing that imports
+          # the DB layer before collection reaches for psycopg2/Postgres.
+          DATABASE_URL: "sqlite:///./ci_test.db"
+          ID_SALT: "ci-test-salt-not-secret"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set +e
+          pytest -m "not pgvector" -q -p no:cacheprovider
+          code=$?
+          set -e
+          # Exit code 5 = "no tests collected". The suite lands with PR #18;
+          # until it merges, keep main green rather than failing on an empty
+          # tests/ dir. Once #18 is in, this genuinely runs all 38 tests.
+          if [ "$code" -eq 5 ]; then
+            echo "::notice::No tests collected yet (suite arrives with #18) — passing."
+            exit 0
+          fi
+          exit $code
