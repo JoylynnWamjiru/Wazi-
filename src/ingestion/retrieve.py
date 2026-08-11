@@ -17,7 +17,7 @@ from src.shared.models import Chunk, GovernmentArm
 
 def retrieve(
     query: str,
-    k: int = 4,
+    k: int = 8,
     government_arm: GovernmentArm | None = None,
 ) -> list[dict]:
     """Embed ``query`` and return the top-``k`` matching chunks from pgvector.
@@ -27,7 +27,9 @@ def retrieve(
 
     Args:
         query: Citizen's question in Swahili, Sheng, or English.
-        k: Number of chunks to retrieve (default 4).
+        k: Number of chunks to retrieve (default 8 — low enough for a tight
+            DeepSeek context, high enough to catch answers that rank ~#8,
+            e.g. the pending-bills figure).
         government_arm: If set, filter chunks by government arm.
     """
     query_vec = embed_texts([query])[0].tolist()
