@@ -38,15 +38,21 @@ jobs:
           ID_SALT: "ci-test-salt-not-secret"
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
+          # Scope to tests/ so we never collect scripts/test_admin_api.py —
+          # a live-HTTP integration script (not a unit test) that would fail
+          # collection with a connection error. This matches pytest.ini's
+          # testpaths once #18 lands.
+          if [ ! -d tests ]; then
+            echo "::notice::No tests/ directory yet (suite arrives with #18) — passing."
+            exit 0
+          fi
           set +e
-          pytest -m "not pgvector" -q -p no:cacheprovider
+          pytest tests/ -m "not pgvector" -q -p no:cacheprovider
           code=$?
           set -e
-          # Exit code 5 = "no tests collected". The suite lands with PR #18;
-          # until it merges, keep main green rather than failing on an empty
-          # tests/ dir. Once #18 is in, this genuinely runs all 38 tests.
+          # Exit code 5 = "no tests collected" — also treat as a pass.
           if [ "$code" -eq 5 ]; then
-            echo "::notice::No tests collected yet (suite arrives with #18) — passing."
+            echo "::notice::No tests collected — passing."
             exit 0
           fi
           exit $code
