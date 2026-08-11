@@ -16,6 +16,7 @@ from src.api.routes.disputes import router as disputes_router
 from src.api.routes.sources import router as sources_router
 from src.api.routes.stats import router as stats_router
 from src.api.routes.sessions import router as sessions_router
+from src.api.routes.validation import router as validation_router
 
 
 @asynccontextmanager
@@ -42,6 +43,7 @@ app.include_router(disputes_router, tags=["disputes"])
 app.include_router(sources_router, tags=["sources"])
 app.include_router(stats_router, tags=["stats"])
 app.include_router(sessions_router, tags=["sessions"])
+app.include_router(validation_router, tags=["validation"])
 
 
 @app.get("/health")
