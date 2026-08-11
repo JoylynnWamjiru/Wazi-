@@ -1,0 +1,9 @@
+# Test/dev dependencies (install on top of requirements.txt):
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# The DB-backed tests use an in-memory SQLite database (see tests/conftest.py),
+# so they need no PostgreSQL. Tests marked `pgvector` need real Postgres +
+# pgvector and are meant to run on the VPS:
+#   pytest -m "not pgvector"   # everything that runs without Postgres
+#   pytest -m pgvector         # VPS only
+pytest>=8.0
