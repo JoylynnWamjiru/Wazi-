@@ -81,7 +81,7 @@ if "pending_query" not in st.session_state:
 
 @st.cache_resource(show_spinner=False)
 def _warm_pipeline() -> bool:
-    """Ensure the corpus exists, then load the embedding model + FAISS index.
+    """Ensure the corpus exists, then pre-load the ONNX embedding model.
 
     Two jobs, done once per server process (cached across reruns):
 
@@ -90,16 +90,20 @@ def _warm_pipeline() -> bool:
        PDFs but no chunks file; without this the first retrieve() would crash
        with FileNotFoundError. The PDFs are committed, so build_corpus() can
        regenerate it deterministically.
-    2. Warm the model so the first real question doesn't hang ~15s while the
-       ONNX model loads.
+    2. Warm the embedding model so the first real question doesn't hang ~15s
+       while the ONNX model downloads (127 MB).  We call ``embed_texts`` directly
+       rather than the full ``retrieve()`` pipeline because the latter requires a
+       running PostgreSQL + pgvector — and on first startup the DB may be empty
+       anyway (chunks are ingested by the scraper, not by the Streamlit warmup).
     """
     from src.ingestion.pipeline import DATA_DIR, build_corpus
-    from src.ingestion.embed import retrieve
+    from src.ingestion.embed import embed_texts
 
     if not (DATA_DIR / "chunks.json").exists():
         build_corpus()
 
-    retrieve("warm up", k=1)
+    # Trigger lazy model download — a single short text is enough.
+    embed_texts(["warm up"])
     return True
 
 
