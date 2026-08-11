@@ -35,6 +35,28 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# A citizen reports a wrong answer by replying with one of these (case- and
+# spacing-insensitive). Kept as exact normalized matches, not substrings, so a
+# genuine question that happens to contain "si kweli" isn't mistaken for a report.
+REPORT_KEYWORDS = frozenset({
+    "si sahihi",   # "not correct" (formal Swahili)
+    "sio sahihi",
+    "si kweli",    # "not true"
+    "sio kweli",
+    "ripoti",      # "report"
+    "report",
+})
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and collapse whitespace for keyword matching."""
+    return " ".join(text.lower().split())
+
+
+def _is_report(text: str) -> bool:
+    """True if the message is a dispute-report keyword, not a question."""
+    return _normalize(text) in REPORT_KEYWORDS
+
 
 @router.post("/whatsapp/incoming")
 async def incoming_message(request: Request, background: BackgroundTasks):
@@ -59,6 +81,8 @@ async def incoming_message(request: Request, background: BackgroundTasks):
     # Hash the wa_id BEFORE anything else touches it.
     user_id = hash_wa_id(raw_wa_id)
 
+    is_report = _is_report(message_text)
+
     # Upsert user and create session.  Commit explicitly BEFORE
     # queuing the background task so the message_id is durable.
     with get_session() as session:
@@ -69,6 +93,7 @@ async def incoming_message(request: Request, background: BackgroundTasks):
             session.flush()
 
         user.last_active_at = datetime.now(timezone.utc)
+        user_db_id = user.id
 
         # Use the most recent active session, or create a new one.
         active_session = (
@@ -82,7 +107,7 @@ async def incoming_message(request: Request, background: BackgroundTasks):
             session.add(active_session)
             session.flush()
 
-        # Store the user's question.
+        # Store the incoming message (question OR report keyword) for history.
         user_msg = Message(
             session_id=active_session.id,
             role="user",
@@ -91,8 +116,30 @@ async def incoming_message(request: Request, background: BackgroundTasks):
         session.add(user_msg)
         session.flush()
         message_id = user_msg.id
-        # The context manager commits on exit — message_id is now durable.
 
+        # A report targets the citizen's most recent assistant answer in
+        # this session — resolve it while the session is open.
+        target_answer_id = None
+        if is_report:
+            last_answer = (
+                session.query(Message)
+                .filter(
+                    Message.session_id == active_session.id,
+                    Message.role == "assistant",
+                )
+                .order_by(Message.id.desc())
+                .first()
+            )
+            target_answer_id = last_answer.id if last_answer else None
+        # The context manager commits on exit — ids are now durable.
+
+    # --- Dispute-report path -------------------------------------------------
+    if is_report:
+        reply = _handle_report(user_db_id, target_answer_id)
+        await send_whatsapp(phone=raw_wa_id, message=reply)
+        return Response(status_code=200)
+
+    # --- Normal question path ------------------------------------------------
     # Send immediate acknowledgment.
     await send_whatsapp(
         phone=raw_wa_id,
@@ -111,6 +158,37 @@ async def incoming_message(request: Request, background: BackgroundTasks):
     )
 
     return Response(status_code=200)
+
+
+def _handle_report(user_db_id: int, target_answer_id: int | None) -> str:
+    """File a dispute against the citizen's last answer, guarded by anti-bot
+    checks.  Returns the citizen-facing reply for each outcome."""
+    if target_answer_id is None:
+        return "Hakuna jibu la hivi karibuni la kuripoti. Uliza swali kwanza. 🙏"
+
+    from src.api.middleware.anti_bot import create_dispute
+
+    verdict = create_dispute(
+        message_id=target_answer_id,
+        user_id=user_db_id,
+        reason="Citizen flagged answer via WhatsApp report keyword",
+    )
+
+    if verdict["created"]:
+        if verdict["flagged_for_review"]:
+            return (
+                "Asante. Jibu hili limeripotiwa na watu kadhaa na sasa "
+                "litapewa kipaumbele cha ukaguzi na msimamizi. 🙏"
+            )
+        return "Asante kwa kuripoti. Jibu hili litakaguliwa na msimamizi. 🙏"
+
+    if verdict["reason"] == "duplicate":
+        return "Tayari ulisharipoti jibu hili. Asante kwa msaada wako. 🙏"
+    if verdict["reason"] == "rate_limited":
+        wait = int(verdict.get("retry_after") or 0)
+        return f"Tafadhali subiri sekunde {wait} kabla ya kuripoti tena."
+    # message_not_found / not_an_answer — shouldn't normally happen.
+    return "Hakuna jibu la hivi karibuni la kuripoti. Uliza swali kwanza. 🙏"
 
 
 async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> None:
