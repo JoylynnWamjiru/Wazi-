@@ -1,5 +1,7 @@
 # Wazi
 
+[![tests](https://github.com/JoylynnWamjiru/Wazi-/actions/workflows/tests.yml/badge.svg)](https://github.com/JoylynnWamjiru/Wazi-/actions/workflows/tests.yml)
+
 > Built during the **Democracy & AI Hackathon** — July 4th, 2026
 > Hosted by **Mozilla Foundation** & **KamiLimu**
 

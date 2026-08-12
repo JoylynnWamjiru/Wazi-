@@ -67,6 +67,14 @@ class DisputeStatus(str, enum.Enum):
     ESCALATED = "escalated"                 # Escalated to external authority (e.g., EACC)
 
 
+class ValidationRegister(str, enum.Enum):
+    """The language register a linguist judged an answer to be written in."""
+    FORMAL_SWAHILI = "formal_swahili"
+    SHENG = "sheng"
+    ENGLISH = "english"
+    MIXED = "mixed"
+
+
 # --- Tables -----------------------------------------------------------------
 
 class User(Base):
@@ -247,3 +255,33 @@ class Chunk(Base):
 
     def __repr__(self) -> str:
         return f"<Chunk id={self.id} source_id={self.source_id} page={self.page_number}>"
+
+
+class Validation(Base):
+    """A linguist's quality rating of a generated answer.
+
+    Feeds the answer-feedback loop (strategic plan §6.1): native speakers rate
+    tone, grounding, and register so the system prompt can be improved. Points
+    at the assistant Message being rated; the original question is derived from
+    the preceding user message in the same session, so this table holds no
+    identity link — it is a signal on the *answer*, not on the citizen.
+    """
+    __tablename__ = "validations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id"), nullable=False, index=True
+    )
+    tone_score: Mapped[int] = mapped_column(Integer, nullable=False)  # 1-5
+    grounded: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    register: Mapped[ValidationRegister] = mapped_column(
+        Enum(ValidationRegister), nullable=False
+    )
+    reviewer: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    def __repr__(self) -> str:
+        return f"<Validation id={self.id} message_id={self.message_id} tone={self.tone_score}>"
