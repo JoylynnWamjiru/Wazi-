@@ -135,7 +135,7 @@ async def incoming_message(request: Request, background: BackgroundTasks):
 
     # --- Dispute-report path -------------------------------------------------
     if is_report:
-        reply = _handle_report(user_db_id, target_answer_id)
+        reply = await asyncio.to_thread(_handle_report, user_db_id, target_answer_id)
         await send_whatsapp(phone=raw_wa_id, message=reply)
         return Response(status_code=200)
 

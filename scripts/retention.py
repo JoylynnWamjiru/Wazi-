@@ -26,8 +26,12 @@ from sqlalchemy import func
 from src.shared.database import get_session
 from src.shared.models import Dispute, Message
 
-MESSAGE_RETENTION_DAYS = 90
-DISPUTE_RETENTION_DAYS = 365
+# Read from environment (with fallback defaults) so the retention windows
+# are configurable without editing code.  Mirrors config.CHAT_RETENTION_DAYS
+# and config.DISPUTE_RETENTION_DAYS from .env.
+import os
+MESSAGE_RETENTION_DAYS = int(os.getenv("CHAT_RETENTION_DAYS", "90"))
+DISPUTE_RETENTION_DAYS = int(os.getenv("DISPUTE_RETENTION_DAYS", "365"))
 
 
 def purge(
