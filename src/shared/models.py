@@ -209,6 +209,9 @@ class Source(Base):
         Enum(IngestionStatus), default=IngestionStatus.PENDING, nullable=False
     )
     ingestion_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )  # SHA-256 of the downloaded PDF — detects silent server-side swaps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
