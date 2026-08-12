@@ -178,14 +178,15 @@ class Dispute(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    __table_args__ = (
-        UniqueConstraint("message_id", "reported_by_user_id", name="uq_dispute_one_per_user"),
-    )
-
     message: Mapped["Message"] = relationship(back_populates="disputes")
 
-    def __repr__(self) -> str:
-        return f"<Dispute id={self.id} status={self.status}>"
+    # Prevent duplicate disputes from the same user on the same answer.
+    __table_args__ = (
+        UniqueConstraint(
+            "message_id", "reported_by_user_id",
+            name="uq_dispute_one_per_user",
+        ),
+    )
 
 
 class Source(Base):
@@ -223,7 +224,7 @@ class Source(Base):
     chunks: Mapped[list["Chunk"]] = relationship(back_populates="source")
 
     __table_args__ = (
-        UniqueConstraint("title", name="uq_source_title"),
+        UniqueConstraint("url", name="uq_source_url"),
     )
 
     def __repr__(self) -> str:

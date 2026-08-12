@@ -38,7 +38,11 @@ router = APIRouter()
 # A citizen reports a wrong answer by replying with one of these (case- and
 # spacing-insensitive). Kept as exact normalized matches, not substrings, so a
 # genuine question that happens to contain "si kweli" isn't mistaken for a report.
-REPORT_KEYWORDS = frozenset({
+#
+# To add new keywords, append to this set. Future: load from an env var
+# (e.g. WAZI_REPORT_KEYWORDS="si sahihi,si kweli,ripoti,report") for
+# hot-reload without redeployment.
+_REPORT_KEYWORDS = frozenset({
     "si sahihi",   # "not correct" (formal Swahili)
     "sio sahihi",
     "si kweli",    # "not true"
@@ -55,7 +59,7 @@ def _normalize(text: str) -> str:
 
 def _is_report(text: str) -> bool:
     """True if the message is a dispute-report keyword, not a question."""
-    return _normalize(text) in REPORT_KEYWORDS
+    return _normalize(text) in _REPORT_KEYWORDS
 
 
 @router.post("/whatsapp/incoming")

@@ -23,7 +23,7 @@ Two kinds of endpoint:
 Admin auth failures: **missing** token → `403`, **wrong** token → `401`.
 
 ```bash
-curl -H "Authorization: Bearer $ADMIN_PASSWORD" http://localhost:8502/api/stats
+curl -H "Authorization: Bearer $ADMIN_PASSWORD" http://localhost:8000/api/stats
 ```
 
 ---
@@ -51,7 +51,7 @@ Behaviour:
   (dedup, 30 s velocity, 3-distinct-reporter diversity).
 
 ```bash
-curl -X POST http://localhost:8502/whatsapp/incoming \
+curl -X POST http://localhost:8000/whatsapp/incoming \
   -d "from=+254700000001" \
   -d "text=Serikali ya Kaunti ya Nakuru inatarajia kupokea kiasi gani kutoka kwa Serikali ya Kitaifa?"
 ```
