@@ -28,6 +28,7 @@ from fastapi.responses import Response
 
 from src.api.messaging import send_whatsapp
 from src.api.middleware.identity import hash_wa_id
+from src.api.middleware.rate_limit import webhook_limiter
 from src.shared.database import get_session
 from src.shared.models import Message, Session, User
 
@@ -80,6 +81,19 @@ async def incoming_message(request: Request, background: BackgroundTasks):
 
     # Hash the wa_id BEFORE anything else touches it.
     user_id = hash_wa_id(raw_wa_id)
+
+    # Rate-limit per citizen (hashed id) before touching the DB or the LLM, so
+    # a flooding number can't run up DeepSeek cost or overload the pipeline.
+    allowed, retry_after = webhook_limiter.check(user_id)
+    if not allowed:
+        await send_whatsapp(
+            phone=raw_wa_id,
+            message=(
+                f"Umetuma maswali mengi kwa muda mfupi. Tafadhali subiri "
+                f"sekunde {int(retry_after)} kisha ujaribu tena. 🙏"
+            ),
+        )
+        return Response(status_code=200)
 
     is_report = _is_report(message_text)
 
