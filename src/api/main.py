@@ -57,6 +57,9 @@ tags_metadata = [
         "the dashboard. Admin-only."},
     {"name": "sessions", "description": "Read-only browsing of conversation "
         "sessions and messages for moderation. Admin-only."},
+    {"name": "validation", "description": "Linguist answer-quality feedback "
+        "loop: native speakers rate generated answers on tone, grounding, and "
+        "register to guide system-prompt improvement. Admin-only."},
 ]
 
 app = FastAPI(
@@ -75,11 +78,13 @@ app = FastAPI(
 app.include_router(webhook_router, tags=["whatsapp"])
 
 # Admin API routes — all require Bearer token authentication.
-app.include_router(disputes_router, tags=["disputes"])
-app.include_router(sources_router, tags=["sources"])
-app.include_router(stats_router, tags=["stats"])
-app.include_router(sessions_router, tags=["sessions"])
-app.include_router(validation_router, tags=["validation"])
+# Each router self-declares its tag (see APIRouter(prefix=..., tags=...)), so we
+# don't repeat tags= here — doing so duplicates the tag in the OpenAPI schema.
+app.include_router(disputes_router)
+app.include_router(sources_router)
+app.include_router(stats_router)
+app.include_router(sessions_router)
+app.include_router(validation_router)
 
 
 @app.get("/health")

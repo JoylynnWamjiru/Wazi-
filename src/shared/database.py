@@ -50,10 +50,15 @@ def init_db() -> None:
     Call once at application startup. Safe to call repeatedly.
     Enables the pgvector extension before creating tables so the
     ``VECTOR(384)`` column type is recognised.
+
+    The ``CREATE EXTENSION`` step is Postgres-only; it is skipped on other
+    dialects (e.g. the SQLite used in tests / local boots) so the app can
+    still start there without the vector-backed retrieval path.
     """
-    with _engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
+    if _engine.dialect.name == "postgresql":
+        with _engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
     Base.metadata.create_all(_engine)
 
 
