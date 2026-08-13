@@ -95,3 +95,19 @@ def seed(db):
                 return m.id
 
     return Seed()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiters():
+    """Reset the process-wide webhook limiters around every test.
+
+    They are module-level singletons, so without this a test that sends many
+    webhook messages could leak rate-limit state into the next test.
+    """
+    from src.api.middleware.rate_limit import block_notice_limiter, webhook_limiter
+
+    webhook_limiter.reset()
+    block_notice_limiter.reset()
+    yield
+    webhook_limiter.reset()
+    block_notice_limiter.reset()

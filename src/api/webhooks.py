@@ -28,7 +28,7 @@ from fastapi.responses import Response
 
 from src.api.messaging import send_whatsapp
 from src.api.middleware.identity import hash_wa_id
-from src.api.middleware.rate_limit import webhook_limiter
+from src.api.middleware.rate_limit import block_notice_limiter, webhook_limiter
 from src.shared.database import get_session
 from src.shared.models import Message, Session, User
 
@@ -86,13 +86,18 @@ async def incoming_message(request: Request, background: BackgroundTasks):
     # a flooding number can't run up DeepSeek cost or overload the pipeline.
     allowed, retry_after = webhook_limiter.check(user_id)
     if not allowed:
-        await send_whatsapp(
-            phone=raw_wa_id,
-            message=(
-                f"Umetuma maswali mengi kwa muda mfupi. Tafadhali subiri "
-                f"sekunde {int(retry_after)} kisha ujaribu tena. 🙏"
-            ),
-        )
+        # Send the "slow down" reply at most once per window (a second, tiny
+        # limiter) so a flood of blocked messages can't amplify into a flood
+        # of outbound WhatsApp sends.
+        notify, _ = block_notice_limiter.check(user_id)
+        if notify:
+            await send_whatsapp(
+                phone=raw_wa_id,
+                message=(
+                    f"Umetuma maswali mengi kwa muda mfupi. Tafadhali subiri "
+                    f"sekunde {int(retry_after)} kisha ujaribu tena. 🙏"
+                ),
+            )
         return Response(status_code=200)
 
     is_report = _is_report(message_text)

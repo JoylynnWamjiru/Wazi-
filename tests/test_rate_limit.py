@@ -54,3 +54,19 @@ def test_reset_clears_state():
     rl.check("a", now=0)
     rl.reset("a")
     assert rl.check("a", now=1)[0] is True
+
+
+def test_sweep_drops_fully_expired_keys():
+    rl = RateLimiter(limit=5, window=60)
+    rl.check("a", now=0)
+    rl.check("b", now=0)
+    # By t=100 both 60s windows have fully expired.
+    assert rl.sweep(now=100) == 2
+    assert rl.check("a", now=100)[0] is True   # fresh capacity, no leak
+
+
+def test_sweep_keeps_active_keys():
+    rl = RateLimiter(limit=5, window=60)
+    rl.check("a", now=0)     # expires at t=60
+    rl.check("b", now=59)    # still inside its window at t=60
+    assert rl.sweep(now=60) == 1               # only "a" is stale; "b" survives
