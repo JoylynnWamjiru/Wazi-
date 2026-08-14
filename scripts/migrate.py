@@ -30,7 +30,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from sqlalchemy import text
 
-from src.shared.database import get_session, init_db
+from src.shared.database import _engine, get_session, init_db
 
 
 def column_exists(session, table: str, column: str) -> bool:
@@ -48,16 +48,48 @@ def constraint_exists(session, name: str) -> bool:
     return row is not None
 
 
-def duplicate_urls(session) -> list[tuple[str, int]]:
-    """Return (url, count) for URLs appearing more than once."""
-    return session.execute(text(
-        "SELECT url, COUNT(*) AS c FROM sources GROUP BY url HAVING COUNT(*) > 1"
-    )).fetchall()
+def enum_value_exists(session, enum_type: str, value: str) -> bool:
+    # ``enum_type`` is a fixed internal type name (not user input), so it's
+    # safe to interpolate directly; the value stays a bound parameter.
+    row = session.execute(text(
+        f"SELECT 1 FROM pg_enum WHERE enumtypid = '{enum_type}'::regtype "
+        "AND enumlabel = :v"
+    ), {"v": value}).first()
+    return row is not None
+
+
+def add_enum_values(enum_type: str, values: list[str], dry_run: bool) -> list[str]:
+    """Add missing values to a PostgreSQL enum type.
+
+    ``ALTER TYPE ... ADD VALUE`` runs on its own autocommit connection (it
+    cannot be used in the same transaction that later reads it, and ``ADD
+    VALUE IF NOT EXISTS`` doesn't exist for enums).  Returns the actions taken.
+    """
+    actions: list[str] = []
+    with _engine.connect() as conn:
+        for value in values:
+            row = conn.execute(text(
+                f"SELECT 1 FROM pg_enum WHERE enumtypid = '{enum_type}'::regtype "
+                "AND enumlabel = :v"
+            ), {"v": value}).first()
+            if row is None:
+                actions.append(f"ALTER TYPE {enum_type} ADD VALUE '{value}'")
+                if not dry_run:
+                    conn.execute(text(f"ALTER TYPE {enum_type} ADD VALUE '{value}'"))
+                    conn.commit()
+    return actions
+
 
 
 def migrate(dry_run: bool = False) -> dict:
     init_db()
     report = {"actions": [], "dry_run": dry_run}
+
+    # 0. Add missing enum values (must run BEFORE any INSERT that uses them,
+    #    and on its own autocommit connection).
+    report["actions"] += add_enum_values(
+        "reporttype", ["CBROP", "PROGRAMME_BUDGET"], dry_run
+    )
 
     with get_session() as session:
         # 1. Add content_hash column.
@@ -68,22 +100,15 @@ def migrate(dry_run: bool = False) -> dict:
                     "ALTER TABLE sources ADD COLUMN content_hash VARCHAR(64)"
                 ))
 
-        # 2. Dedupe sources.url before adding the UNIQUE constraint.
-        if not constraint_exists(session, "uq_source_url"):
-            dups = duplicate_urls(session)
-            if dups:
-                report["actions"].append(
-                    f"DELETE duplicate sources (keeping MIN(id) per URL): {len(dups)} urls"
-                )
-                if not dry_run:
-                    session.execute(text(
-                        "DELETE FROM sources WHERE id NOT IN "
-                        "(SELECT MIN(id) FROM sources GROUP BY url)"
-                    ))
-            report["actions"].append("ADD CONSTRAINT uq_source_url UNIQUE (url)")
+        # 2. DROP the now-removed uq_source_url constraint. It was a mistake:
+        #    ``sources.url`` stores a LISTING PAGE, which legitimately hosts
+        #    many documents (e.g. one OAG page holds both the Executive and
+        #    Assembly audits), so ``url`` must NOT be unique.
+        if constraint_exists(session, "uq_source_url"):
+            report["actions"].append("DROP CONSTRAINT uq_source_url (url is a listing page)")
             if not dry_run:
                 session.execute(text(
-                    "ALTER TABLE sources ADD CONSTRAINT uq_source_url UNIQUE (url)"
+                    "ALTER TABLE sources DROP CONSTRAINT uq_source_url"
                 ))
 
         # 3. Add dispute dedup constraint.

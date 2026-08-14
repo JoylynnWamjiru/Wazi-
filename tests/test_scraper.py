@@ -218,14 +218,16 @@ def test_ingest_url_registers_a_new_source(db, monkeypatch):
         assert src.ingestion_status == IngestionStatus.FAILED
 
 
-def test_ingest_url_reuses_existing_source_by_url(db, monkeypatch):
+def test_ingest_url_reuses_source_with_same_url_and_title(db, monkeypatch):
+    """Idempotent by (url, title): re-registering the SAME document edition
+    updates the existing row rather than duplicating it."""
     from src.ingestion.scraper import ingest_url
     from src.shared.models import GovernmentArm, ReportType, Source
 
     with db.get_session() as s:
         s.add(Source(
             url="https://example.com/report.pdf",
-            title="Old Title",
+            title="Nakuru Audit FY2024",
             publisher="OAG",
             government_arm="executive",
             county="nakuru",
@@ -243,7 +245,7 @@ def test_ingest_url_reuses_existing_source_by_url(db, monkeypatch):
 
     result = ingest_url(
         url="https://example.com/report.pdf",
-        title="Updated Title",
+        title="Nakuru Audit FY2024",          # SAME title → reuse
         publisher="CoB",
         government_arm=GovernmentArm.CONSOLIDATED,
         report_type=ReportType.BIRR,
@@ -251,14 +253,53 @@ def test_ingest_url_reuses_existing_source_by_url(db, monkeypatch):
         county="nakuru",
     )
 
-    assert result["status"] == "failed"
+    assert result["status"] == "failed"  # mock download fails
 
     with db.get_session() as s:
         sources = s.query(Source).filter_by(url="https://example.com/report.pdf").all()
-        assert len(sources) == 1
+        assert len(sources) == 1             # idempotent — no duplicate
         src = sources[0]
-        assert src.title == "Updated Title"
-        assert src.publisher == "CoB"
+        assert src.publisher == "CoB"        # metadata updated in place
+
+
+def test_ingest_url_allows_same_url_with_different_title(db, monkeypatch):
+    """A listing page hosts many documents — the same URL with a DIFFERENT
+    title (edition) must create a separate source, not reuse."""
+    from src.ingestion.scraper import ingest_url
+    from src.shared.models import GovernmentArm, ReportType, Source
+
+    with db.get_session() as s:
+        s.add(Source(
+            url="https://example.com/oag-fy2024/",
+            title="Nakuru County Executive FY 2024",
+            publisher="OAG",
+            government_arm="executive",
+            county="nakuru",
+            report_type="audit_report",
+            fiscal_year="2024",
+        ))
+        s.flush()
+
+    monkeypatch.setattr(
+        "src.ingestion.scraper.download_pdf",
+        lambda url, timeout=120: (_ for _ in ()).throw(
+            RuntimeError("mock: no real PDF in unit test")
+        ),
+    )
+
+    ingest_url(
+        url="https://example.com/oag-fy2024/",
+        title="Nakuru County Assembly FY 2024",   # DIFFERENT title → new source
+        publisher="OAG",
+        government_arm=GovernmentArm.ASSEMBLY,
+        report_type=ReportType.AUDIT_REPORT,
+        fiscal_year="2024",
+        county="nakuru",
+    )
+
+    with db.get_session() as s:
+        sources = s.query(Source).filter_by(url="https://example.com/oag-fy2024/").all()
+        assert len(sources) == 2             # both documents coexist
 
 
 def test_ingest_url_rejects_private_ip_before_registration(db):

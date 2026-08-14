@@ -223,10 +223,6 @@ class Source(Base):
 
     chunks: Mapped[list["Chunk"]] = relationship(back_populates="source")
 
-    __table_args__ = (
-        UniqueConstraint("url", name="uq_source_url"),
-    )
-
     def __repr__(self) -> str:
         return f"<Source id={self.id} title={self.title}>"
 

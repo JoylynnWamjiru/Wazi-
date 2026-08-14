@@ -76,36 +76,37 @@ def test_dispute_unique_constraint_prevents_duplicate(seed):
     assert v2["reason"] == "duplicate"
 
 
-def test_source_unique_constraint_prevents_duplicate_url(db):
-    """Two sources with the same URL — the second INSERT raises IntegrityError."""
-    from sqlalchemy.exc import IntegrityError
-
+def test_sources_can_share_a_listing_page_url(db):
+    """A listing page legitimately hosts many documents — the same URL must
+    be allowed across sources that differ by title / government_arm (e.g. one
+    OAG page holds both the Executive and Assembly audits)."""
     from src.shared.models import Source
 
     with db.get_session() as s:
         s.add(Source(
-            url="https://example.com/unique-test.pdf",
-            title="First",
+            url="https://example.com/oag-fy2024-reports/",
+            title="Nakuru County Executive FY 2024",
             publisher="OAG",
             government_arm="executive",
             county="nakuru",
             report_type="audit_report",
+            fiscal_year="2024",
         ))
-        # Commit the first source so the constraint is visible.
+        s.add(Source(
+            url="https://example.com/oag-fy2024-reports/",
+            title="Nakuru County Assembly FY 2024",
+            publisher="OAG",
+            government_arm="assembly",
+            county="nakuru",
+            report_type="audit_report",
+            fiscal_year="2024",
+        ))
         s.flush()
 
-    # Second session: try inserting a duplicate URL.
-    with pytest.raises(IntegrityError):
-        with db.get_session() as s2:
-            s2.add(Source(
-                url="https://example.com/unique-test.pdf",
-                title="Second — same URL",
-                publisher="CoB",
-                government_arm="assembly",
-                county="nakuru",
-                report_type="birr",
-            ))
-            s2.flush()
+        count = s.query(Source).filter_by(
+            url="https://example.com/oag-fy2024-reports/"
+        ).count()
+        assert count == 2  # both rows coexist — no UNIQUE(url) constraint
 
 
 # ---------------------------------------------------------------------------

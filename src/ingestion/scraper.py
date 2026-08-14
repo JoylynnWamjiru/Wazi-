@@ -367,10 +367,11 @@ def ingest_url(
     # Validate the URL BEFORE touching the database (SSRF guard).
     _validate_url(url)
 
-    # 1. Register the source (idempotent by URL — if the same URL was
-    #    already registered, reuse it and re-ingest).
+    # 1. Register the source (idempotent by (url, title) — a listing page can
+    #    legitimately host MANY documents, so ``url`` alone is not a unique
+    #    identity; the (url, title) pair identifies a specific document edition.
     with get_session() as session:
-        existing = session.query(Source).filter_by(url=url).first()
+        existing = session.query(Source).filter_by(url=url, title=title).first()
         if existing:
             source_id = existing.id
             # Update metadata in case it changed.
