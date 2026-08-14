@@ -9,10 +9,36 @@ The old regex-based value-for-money check is replaced by a lightweight
 LLM call in ``vfm.py``.
 """
 
-from src.ingestion.retrieve import retrieve
+from src.ingestion import retrieve_local
+from src.ingestion.retrieve import retrieve as retrieve_pgvector
 from src.ingestion.generate import generate, parse_response
 from src.ingestion.vfm import check_value_for_money
 from src.shared import config
+
+
+def _retrieve(query: str, k: int) -> list[dict]:
+    """Retrieve chunks using the configured backend (``config.RETRIEVAL_BACKEND``).
+
+    - ``pgvector`` : PostgreSQL/pgvector only (production / VPS).
+    - ``local``    : in-memory chunks.json only (no DB, e.g. Streamlit Cloud).
+    - ``auto``     : try pgvector, fall back to local when the DB is unreachable.
+    """
+    backend = config.RETRIEVAL_BACKEND
+    if backend == "local":
+        return retrieve_local.retrieve(query, k=k)
+    if backend == "pgvector":
+        return retrieve_pgvector(query, k=k)
+
+    # auto: prefer pgvector, fall back to the local corpus if it's unavailable
+    # (e.g. no PostgreSQL on Streamlit Community Cloud).
+    try:
+        return retrieve_pgvector(query, k=k)
+    except Exception as exc:  # noqa: BLE001 - any DB/driver failure -> local
+        print(
+            f"[retrieve] pgvector unavailable ({type(exc).__name__}), "
+            "falling back to local chunks.json"
+        )
+        return retrieve_local.retrieve(query, k=k)
 
 
 def get_response(query: str) -> dict:
@@ -32,7 +58,7 @@ def get_response(query: str) -> dict:
 
         # k=8: the pending-bills answer lives in a chunk that ranks ~#8;
         # at k=4 it was a false negative. Verified on the old pipeline.
-        chunks = retrieve(query, k=8)
+        chunks = _retrieve(query, k=8)
         raw = generate(chunks, query)
         return parse_response(raw, chunks)
 
