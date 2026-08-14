@@ -464,6 +464,11 @@ def main() -> None:
         "--url",
         help="Register AND ingest a new source in one step.",
     )
+    group.add_argument(
+        "--all",
+        action="store_true",
+        help="Ingest every PENDING source in the registry (bulk).",
+    )
 
     # --url mode metadata (required when --url is used).
     parser.add_argument("--title", help="Human-readable title for the document.")
@@ -484,6 +489,35 @@ def main() -> None:
     args = parser.parse_args()
 
     init_db()
+
+    if args.all:
+        with get_session() as session:
+            pending = (
+                session.query(Source)
+                .filter(Source.ingestion_status == IngestionStatus.PENDING)
+                .order_by(Source.id)
+                .all()
+            )
+            pending_ids = [s.id for s in pending]
+
+        if not pending_ids:
+            print("[scraper] no PENDING sources to ingest.")
+            return
+
+        print(f"[scraper] bulk-ingesting {len(pending_ids)} PENDING sources...")
+        results = []
+        for sid in pending_ids:
+            results.append(ingest_source(sid))
+
+        ok = sum(1 for r in results if r["status"] == "completed")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        skipped = sum(1 for r in results if r["status"] == "skipped")
+        print(f"\n[scraper] bulk complete: {ok} completed, {failed} failed, {skipped} skipped.")
+        for r in results:
+            status = r.get("status")
+            if status != "completed":
+                print(f"  [{status}] source {r['source_id']}: {r.get('error', '')[:120]}")
+        return
 
     if args.source_id:
         result = ingest_source(args.source_id)
