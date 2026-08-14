@@ -41,6 +41,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from sqlalchemy import update
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -284,7 +285,9 @@ def ingest_source(source_id: int) -> dict:
     updated to COMPLETED or FAILED.
 
     Guards:
-    - Rejects concurrent ingestion of the same source (IN_PROGRESS check).
+    - Atomically claims the source (IN_PROGRESS) so two concurrent
+      ingestions of the same source can't both run — the loser gets
+      "skipped" without ever downloading the PDF.
     - Enforces SSRF, max file size, and filename sanitization in download_pdf.
     """
     with get_session() as session:
@@ -292,22 +295,31 @@ def ingest_source(source_id: int) -> dict:
         if source is None:
             return {"source_id": source_id, "status": "error", "error": "not_found"}
 
-        # Guard: don't start a second ingestion if one is already running.
-        if source.ingestion_status == IngestionStatus.IN_PROGRESS:
+        url = source.url
+        government_arm = source.government_arm
+        county = source.county
+
+        # Atomic claim: set IN_PROGRESS only if it isn't already.  The
+        # rowcount tells us whether WE won the claim (1) or another
+        # ingestion already holds it (0).  This closes the TOCTOU race
+        # that a read-then-write guard would leave open.
+        result = session.execute(
+            update(Source)
+            .where(
+                Source.id == source_id,
+                Source.ingestion_status != IngestionStatus.IN_PROGRESS,
+            )
+            .values(ingestion_status=IngestionStatus.IN_PROGRESS)
+        )
+        if result.rowcount == 0:
             return {
                 "source_id": source_id,
                 "status": "skipped",
                 "error": f"Source {source_id} is already being ingested (status: in_progress).",
             }
 
-        url = source.url
-        government_arm = source.government_arm
-        county = source.county
-
     pdf_path: Path | None = None
     try:
-        _mark_status(source_id, IngestionStatus.IN_PROGRESS)
-
         pdf_path, content_hash = download_pdf(url)
         print(
             f"[scraper] downloaded {url} → {pdf_path} "

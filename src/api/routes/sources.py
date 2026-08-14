@@ -274,11 +274,12 @@ def trigger_ingestion(
                 detail=f"Source {source_id} is already being ingested (status: in_progress)",
             )
 
-        source.ingestion_status = IngestionStatus.IN_PROGRESS
-        session.flush()
-
     # Queue the actual download + pipeline in a background thread so the
     # admin doesn't wait 2+ minutes for a PDF download + embedding.
+    # NOTE: we do NOT set IN_PROGRESS here — ``ingest_source`` atomically
+    # claims the source (sets IN_PROGRESS) when the background task runs.
+    # Pre-setting it here would make the background task see IN_PROGRESS
+    # and skip, so ingestion would never actually run.
     from src.ingestion.scraper import ingest_source
     background.add_task(ingest_source, source_id)
 
