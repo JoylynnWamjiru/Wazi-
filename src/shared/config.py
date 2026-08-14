@@ -21,6 +21,16 @@ DATABASE_URL = os.getenv(
     "postgresql://wazi:wazi_password@localhost:5432/wazi_db",
 )
 
+# --- Retrieval backend ---
+# Which retrieval path the citizen pipeline uses:
+#   "pgvector" — always query PostgreSQL/pgvector (the VPS / production path)
+#   "local"    — read data/chunks.json + in-memory cosine (no PostgreSQL; set
+#                this on Streamlit Community Cloud, which has no database)
+#   "auto"     — try pgvector, transparently fall back to local when the DB is
+#                unreachable (default: resilient everywhere, slightly slower on
+#                the first failed connection)
+RETRIEVAL_BACKEND = os.getenv("RETRIEVAL_BACKEND", "auto").lower()
+
 # --- Africa's Talking ---
 AT_API_KEY = os.getenv("AT_API_KEY")
 AT_USERNAME = os.getenv("AT_USERNAME", "sandbox")
