@@ -23,6 +23,17 @@ load_dotenv()
 
 API_URL = os.getenv("WAZI_API_URL", "http://localhost:8000").rstrip("/")
 
+# Split connect vs read timeouts. A short connect timeout fails fast when the
+# host is genuinely unreachable (DNS/down), while a long read timeout survives a
+# cold start: Render's free tier spins the backend down after ~15 min idle and
+# takes ~50s to wake on the next request. A single 15s timeout can't tell the
+# two apart and times out mid-wake. Overridable via WAZI_API_READ_TIMEOUT.
+_READ_TIMEOUT = float(os.getenv("WAZI_API_READ_TIMEOUT", "60"))
+API_TIMEOUT = httpx.Timeout(connect=10.0, read=_READ_TIMEOUT, write=10.0, pool=10.0)
+# The login probe is the request most likely to hit a cold backend, so give it
+# extra read headroom.
+WAKE_TIMEOUT = httpx.Timeout(connect=10.0, read=max(_READ_TIMEOUT, 90.0), write=10.0, pool=10.0)
+
 DISPUTE_TRANSITIONS: dict[str, list[str]] = {
     "pending_review": ["under_review"],
     "under_review": ["resolved_valid", "resolved_invalid", "escalated"],
@@ -59,7 +70,7 @@ def api_request(method: str, path: str, **kwargs) -> dict | None:
     """Call the admin API. Returns parsed JSON, or None after showing an error."""
     try:
         response = httpx.request(
-            method, f"{API_URL}{path}", headers=_headers(), timeout=30.0, **kwargs
+            method, f"{API_URL}{path}", headers=_headers(), timeout=API_TIMEOUT, **kwargs
         )
     except httpx.HTTPError as exc:
         st.error(f"API unreachable at {API_URL} — {type(exc).__name__}. Is the backend running?")
@@ -89,11 +100,15 @@ if "admin_token" not in st.session_state:
         submitted = st.form_submit_button("Log in")
     if submitted:
         try:
-            probe = httpx.get(
-                f"{API_URL}/api/stats",
-                headers={"Authorization": f"Bearer {password}"},
-                timeout=15.0,
-            )
+            with st.spinner(
+                "Inaamsha seva... _(waking the backend — the first request "
+                "after it's been idle can take up to a minute on Render's free tier)_"
+            ):
+                probe = httpx.get(
+                    f"{API_URL}/api/stats",
+                    headers={"Authorization": f"Bearer {password}"},
+                    timeout=WAKE_TIMEOUT,
+                )
         except httpx.HTTPError as exc:
             st.error(f"API unreachable at {API_URL} — {type(exc).__name__}. Is the backend running?")
             st.stop()
