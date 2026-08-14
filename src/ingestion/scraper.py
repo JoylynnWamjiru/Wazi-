@@ -49,7 +49,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.ingestion.chunk import chunk_pages
 from src.ingestion.embed import delete_chunks, store_chunks
-from src.ingestion.extract import check_text_layer, extract_pages
+from src.ingestion.extract import check_text_layer, extract_county_section
 from src.shared.database import get_session, init_db
 from src.shared.models import (
     GovernmentArm,
@@ -223,7 +223,12 @@ def _run_pipeline(
     government_arm: GovernmentArm,
     county: str,
 ) -> int:
-    """Extract, chunk, embed, and store ONE PDF.  Returns chunk count."""
+    """Extract (county-scoped), chunk, embed, and store ONE PDF.
+
+    Returns the chunk count.  For consolidated 47-county PDFs, only the
+    *county* section is extracted via heading search (``extract_county_section``);
+    for a single-county PDF (no section headings) every page is used.
+    """
     path_str = str(pdf_path)
 
     if not check_text_layer(path_str):
@@ -237,7 +242,13 @@ def _run_pipeline(
     if removed:
         print(f"  cleared {removed} existing chunks for source {source_id}")
 
-    pages = extract_pages(path_str)
+    pages = extract_county_section(path_str, county=county)
+    if not pages:
+        raise ValueError(
+            f"No pages found for county '{county}' in '{pdf_path.name}' — "
+            f"is the county name spelled correctly in the document headings?"
+        )
+
     chunks = chunk_pages(pages)
     stored = store_chunks(
         chunks,
@@ -274,6 +285,33 @@ def _mark_status(
 # Public API
 # ---------------------------------------------------------------------------
 
+def _resolve_pdf(source_meta: dict) -> tuple[Path, str]:
+    """Download the actual PDF for a source, resolving listing pages.
+
+    ``sources.url`` is either a direct PDF link (ends in ``.pdf``) or a
+    LISTING PAGE (HTML) that hosts many documents.  For a listing page this
+    fetches the HTML, parses out the PDF links, and selects the one matching
+    the source's title / government_arm / report_type — a loud failure if
+    nothing matches (never a silent wrong-document ingestion).
+
+    ``source_meta`` must carry ``url``, ``title``, ``government_arm`` (value)
+    and ``report_type`` (value).
+    """
+    url = source_meta["url"]
+
+    # Direct PDF link — no listing-page hop needed.
+    if url.lower().endswith(".pdf"):
+        return download_pdf(url)
+
+    # Listing page — resolve (one level for OAG/CoB, two levels for KIPPRA's
+    # abstract-page repositories) to the concrete PDF, then download it.
+    from src.ingestion.scraper_listing import resolve_pdf_url
+
+    selected_url = resolve_pdf_url(url, source_meta)
+    print(f"[scraper] resolved listing page: {url} → {selected_url}")
+    return download_pdf(selected_url)
+
+
 def ingest_source(source_id: int) -> dict:
     """Download + ingest an already-registered source.  Returns a summary dict.
 
@@ -298,6 +336,12 @@ def ingest_source(source_id: int) -> dict:
         url = source.url
         government_arm = source.government_arm
         county = source.county
+        source_meta = {
+            "url": url,
+            "title": source.title,
+            "government_arm": government_arm.value,
+            "report_type": source.report_type.value,
+        }
 
         # Atomic claim: set IN_PROGRESS only if it isn't already.  The
         # rowcount tells us whether WE won the claim (1) or another
@@ -320,9 +364,9 @@ def ingest_source(source_id: int) -> dict:
 
     pdf_path: Path | None = None
     try:
-        pdf_path, content_hash = download_pdf(url)
+        pdf_path, content_hash = _resolve_pdf(source_meta)
         print(
-            f"[scraper] downloaded {url} → {pdf_path} "
+            f"[scraper] downloaded → {pdf_path} "
             f"({pdf_path.stat().st_size} bytes, sha256={content_hash[:12]}…)"
         )
 
