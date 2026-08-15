@@ -91,9 +91,21 @@ DEEPSEEK_MODEL=deepseek-chat
 
 DATABASE_URL=postgresql://wazi:REPLACE_WITH_DB_PASSWORD@localhost:5432/wazi_db
 
+# Messaging provider: "africastalking" (default) or "twilio"
+MESSAGING_PROVIDER=twilio
+
+# Africa's Talking (used when MESSAGING_PROVIDER=africastalking)
 AT_API_KEY=your-at-api-key
 AT_USERNAME=sandbox
 WA_BOT_NUMBER=+254700000000
+
+# Twilio (used when MESSAGING_PROVIDER=twilio) — from console.twilio.com
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=your-twilio-auth-token
+TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
+# Set this to the exact public URL Twilio POSTs to (behind Nginx the app
+# can't always reconstruct the signed URL). Signature validation depends on it.
+TWILIO_WEBHOOK_BASE_URL=https://REPLACE_WITH_YOUR_DOMAIN/whatsapp/incoming
 
 ID_SALT=REPLACE_WITH_SECRETS_TOKEN_HEX_32_OUTPUT
 ADMIN_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
@@ -161,6 +173,12 @@ echo "  1. Edit /opt/wazi/.env:"
 echo "     - DEEPSEEK_API_KEY (your actual key)"
 echo "     - ID_SALT (run: python3 -c 'import secrets; print(secrets.token_hex(32))')"
 echo "     - ADMIN_PASSWORD (strong password)"
+echo "     - MESSAGING_PROVIDER=twilio, plus TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN /"
+echo "       TWILIO_WHATSAPP_NUMBER, and TWILIO_WEBHOOK_BASE_URL = your public"
+echo "       https URL ending in /whatsapp/incoming (needed for signature checks)"
+echo ""
+echo "  1b. In the Twilio console, set the WhatsApp 'When a message comes in'"
+echo "      webhook to POST that same https URL (…/whatsapp/incoming)."
 echo ""
 echo "  2. Seed the database:"
 echo "     cd /opt/wazi && source venv/bin/activate"

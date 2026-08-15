@@ -91,6 +91,10 @@ def generate(chunks: list[dict], query: str) -> str:
         json={
             "model": config.DEEPSEEK_MODEL,
             "max_tokens": 1024,
+            # Deterministic decoding for grounded factual answers. Previously
+            # unset, so the API default (1.0 for deepseek-chat) applied — a
+            # prime suspect for run-to-run inconsistency.
+            "temperature": 0,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
