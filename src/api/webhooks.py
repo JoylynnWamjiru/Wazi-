@@ -1,18 +1,23 @@
 """WhatsApp webhook receiver — the citizen entry point.
 
-Africa's Talking sends incoming WhatsApp messages as form-encoded POST
-requests to the callback URL configured in the AT dashboard.
+Accepts form-encoded POSTs from either messaging provider:
+
+- **Africa's Talking** sends fields ``from`` (wa_id) and ``text`` (body).
+- **Twilio** sends ``From`` (``whatsapp:+254...``), ``WaId`` (``254...``)
+  and ``Body`` (message), signed with an ``X-Twilio-Signature`` header
+  that is verified before the payload is touched.
 
 Flow:
-    1. AT sends POST with form fields (``from``, ``text``, etc.)
-    2. Webhook hashes ``wa_id`` → ``user_id`` immediately
-    3. Finds or creates a User + Session; stores the user message
-    4. Commits the session explicitly so the message_id is durable
+    1. Provider POSTs a form-encoded message
+    2. Twilio requests have their signature validated (403 on failure)
+    3. Webhook canonicalizes + hashes the wa_id → ``user_id`` immediately
+    4. Finds or creates a User + Session; stores the user message
+    5. Commits the session explicitly so the message_id is durable
        BEFORE the background task fires
-    5. Sends an immediate acknowledgment: "Natafuta jibu..."
-    6. Queues pipeline processing in a thread pool (not the event loop)
+    6. Sends an immediate acknowledgment: "Natafuta jibu..."
+    7. Queues pipeline processing in a thread pool (not the event loop)
        so synchronous RAG + LLM calls don't block the async server
-    7. Returns 200 OK to AT within ~200ms
+    8. Returns 200 OK within ~200ms
 
 The pipeline (retrieval + generation) runs in a thread pool.  When it
 finishes, the answer is sent as a second WhatsApp message.  This means
@@ -26,7 +31,11 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import Response
 
-from src.api.messaging import send_whatsapp
+from src.api.messaging import (
+    TWILIO_WEBHOOK_BASE_URL,
+    send_whatsapp,
+    validate_twilio_signature,
+)
 from src.api.middleware.identity import hash_wa_id
 from src.api.middleware.rate_limit import block_notice_limiter, webhook_limiter
 from src.shared.database import get_session
@@ -59,24 +68,61 @@ def _is_report(text: str) -> bool:
     return _normalize(text) in REPORT_KEYWORDS
 
 
+def _canonical_wa_id(value: str) -> str:
+    """Normalize a wa_id to E.164 (``+2547...``).
+
+    Africa's Talking already sends ``+2547...``.  Twilio sends ``WaId``
+    without the leading ``+`` (``2547...``) and ``From`` as
+    ``whatsapp:+2547...``.  Canonicalizing to E.164 means the same citizen
+    hashes to the same identity whichever provider delivered the message.
+    """
+    value = (value or "").strip()
+    if value.startswith("whatsapp:"):
+        value = value[len("whatsapp:"):]
+    if value and not value.startswith("+"):
+        value = "+" + value
+    return value
+
+
 @router.post("/whatsapp/incoming")
 async def incoming_message(request: Request, background: BackgroundTasks):
-    """Receive a WhatsApp message from Africa's Talking.
+    """Receive a WhatsApp message from Africa's Talking or Twilio.
 
-    The webhook payload is ``application/x-www-form-urlencoded`` with
-    fields like ``from`` (wa_id) and ``text`` (message body).
+    Both providers POST ``application/x-www-form-urlencoded``:
+
+    - Africa's Talking: ``from`` (wa_id) and ``text`` (body)
+    - Twilio: ``From`` (``whatsapp:+254...``), ``WaId`` (``254...``),
+      ``Body`` (message) — plus an ``X-Twilio-Signature`` header.
 
     Responds 200 OK immediately.  Pipeline processing happens in the
-    background so AT doesn't time out waiting for the LLM.
+    background so the provider doesn't time out waiting for the LLM.
     """
     form = await request.form()
 
-    raw_wa_id = form.get("from")
-    message_text = form.get("text")
+    provider = "twilio" if "Body" in form else "africastalking"
+    # Log field NAMES (not values) so the real payload shape can be verified
+    # against live Twilio traffic without logging any PII.
+    logger.info("Incoming webhook provider=%s fields=%s", provider, sorted(form.keys()))
+
+    # Twilio signs every request — verify before touching the payload.
+    if provider == "twilio":
+        url = TWILIO_WEBHOOK_BASE_URL or str(request.url)
+        if not validate_twilio_signature(
+            url, dict(form), request.headers.get("X-Twilio-Signature")
+        ):
+            logger.warning("Rejected webhook with invalid Twilio signature")
+            return Response(status_code=403)
+
+    if provider == "twilio":
+        raw_wa_id = _canonical_wa_id(form.get("WaId") or form.get("From") or "")
+        message_text = form.get("Body")
+    else:
+        raw_wa_id = _canonical_wa_id(form.get("from") or "")
+        message_text = form.get("text")
 
     # Silently ignore empty or malformed messages.
     if not raw_wa_id or not message_text:
-        logger.debug("Ignoring message with missing from/text fields")
+        logger.debug("Ignoring message with missing sender/body fields")
         return Response(status_code=200)
 
     # Hash the wa_id BEFORE anything else touches it.

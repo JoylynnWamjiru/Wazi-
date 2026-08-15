@@ -31,10 +31,22 @@ DATABASE_URL = os.getenv(
 #                the first failed connection)
 RETRIEVAL_BACKEND = os.getenv("RETRIEVAL_BACKEND", "auto").lower()
 
+# --- Messaging provider ---
+# Which WhatsApp gateway the outbound layer uses:
+#   "africastalking" — Africa's Talking (default)
+#   "twilio"         — Twilio WhatsApp (sandbox or production number)
+MESSAGING_PROVIDER = os.getenv("MESSAGING_PROVIDER", "africastalking").lower()
+
 # --- Africa's Talking ---
 AT_API_KEY = os.getenv("AT_API_KEY")
 AT_USERNAME = os.getenv("AT_USERNAME", "sandbox")
 WA_BOT_NUMBER = os.getenv("WA_BOT_NUMBER")
+
+# --- Twilio ---
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
+TWILIO_WEBHOOK_BASE_URL = os.getenv("TWILIO_WEBHOOK_BASE_URL")
 
 # --- Identity ---
 ID_SALT = os.getenv("ID_SALT", "dev-salt-change-in-production")
