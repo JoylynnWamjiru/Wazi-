@@ -14,6 +14,9 @@ faiss-cpu  # still required by src/ingestion/embed.py — remove when pgvector m
 anthropic
 python-dotenv
 
+# Messaging
+twilio
+
 # Ingestion
 pymupdf
 apscheduler

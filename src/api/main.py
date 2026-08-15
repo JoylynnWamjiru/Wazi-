@@ -32,9 +32,11 @@ Swahili, Sheng, or English — grounded **only** in official audit and budget
 documents, with a source citation on every reply.
 
 ### Two kinds of endpoint
-- **Public webhook** (`/whatsapp/incoming`) — Africa's Talking posts incoming
-  WhatsApp messages here. No auth: the sender is the messaging provider, and
-  the raw phone number is HMAC-hashed on receipt and never stored.
+- **Public webhook** (`/whatsapp/incoming`) — the messaging provider
+  (Africa's Talking or Twilio) posts incoming WhatsApp messages here. No
+  auth: the sender is the messaging provider, Twilio requests are
+  signature-verified, and the raw phone number is HMAC-hashed on receipt
+  and never stored.
 - **Admin API** (`/api/*`) — everything else. Requires a Bearer token
   (`Authorization: Bearer <ADMIN_PASSWORD>`). Powers the moderation dashboard.
 
