@@ -32,6 +32,13 @@ def client(db, monkeypatch):
 
     monkeypatch.setattr(webhooks, "send_whatsapp", _fake_send)
 
+    # These tests exercise Twilio payload parsing + dispute wiring, not
+    # signature verification. Stub validation to True so the result does not
+    # depend on whether real Twilio credentials happen to be in the ambient
+    # environment (a real TWILIO_AUTH_TOKEN in .env would otherwise turn
+    # validation on and 403 these unsigned test requests).
+    monkeypatch.setattr(webhooks, "validate_twilio_signature", lambda *a, **k: True)
+
     app = FastAPI()
     app.include_router(webhooks.router)
     tc = TestClient(app)
