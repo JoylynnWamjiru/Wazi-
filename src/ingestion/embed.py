@@ -31,13 +31,26 @@ def _get_model():
     return _model
 
 
-def embed_texts(texts: list[str]) -> np.ndarray:
+def embed_texts(texts: list[str], batch_size: int = 32) -> np.ndarray:
     """Embed texts to L2-normalized float32 vectors.
 
     Returns a (N, 384) numpy array of unit vectors — inner product == cosine.
+
+    Batched so a large corpus (a consolidated county PDF's Nakuru section can
+    be hundreds of chunks) doesn't make ONNX allocate one giant buffer — which
+    blows the 1 GB VPS / dev-machine RAM with an OOM error.
     """
     model = _get_model()
-    vectors = np.array(list(model.embed(texts)), dtype="float32")
+    if not texts:
+        return np.zeros((0, 384), dtype="float32")
+
+    batches: list[np.ndarray] = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        vectors = np.array(list(model.embed(batch)), dtype="float32")
+        batches.append(vectors)
+
+    vectors = np.concatenate(batches, axis=0)
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
     return vectors / np.clip(norms, 1e-12, None)
 
