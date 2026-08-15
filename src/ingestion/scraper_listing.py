@@ -85,20 +85,55 @@ def extract_links(html: str, base_url: str) -> list[dict]:
     return links
 
 
+def extract_wpdm_downloads(html: str, base_url: str) -> list[dict]:
+    """Parse WordPress Download Manager links (used by CoB).
+
+    WPDM renders the download as ``<a href="#" onclick="location.href='…?wpdmdl=N'">``
+    with the report title in a following ``<h3>``.  The ``onclick`` URL serves
+    the PDF directly.  Returns ``{"title": str, "url": str, "is_pdf": True}``.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    seen: set[str] = set()
+    results: list[dict] = []
+    for a in soup.find_all("a", href=True):
+        cls = " ".join(a.get("class", []))
+        onclick = a.get("onclick", "")
+        m = re.search(r"location\.href\s*=\s*'([^']+)'", onclick)
+        if m is None:
+            continue
+        url = urljoin(base_url, m.group(1))
+        if url in seen:
+            continue
+        seen.add(url)
+        # Title lives in the nearest following (or preceding) <h3>.
+        title = ""
+        h3 = a.find_next("h3")
+        if h3 is None:
+            h3 = a.find_previous("h3")
+        if h3 is not None:
+            title = h3.get_text(" ", strip=True)
+        if not title:
+            title = url.rsplit("/", 1)[-1]
+        results.append({"title": title, "url": url, "is_pdf": True})
+    return results
+
+
 def resolve_pdf_url(listing_url: str, source: dict) -> str:
     """Resolve a listing page to the one concrete PDF URL for *source*.
 
-    Handles two page structures:
+    Handles three page structures:
 
-    1. **Direct PDF listing** (OAG / CoB): the listing page links straight to
-       ``.pdf`` files — select the best match by keyword.
+    1. **Direct PDF listing** (OAG): the listing page links straight to
+       ``.pdf`` files — select the best match by keyword (the filename carries
+       the signal when the anchor is a bare "Download").
 
-    2. **Two-level repository** (KIPPRA): the listing page links to *abstract
-       pages* (HTML), each of which holds the actual ``.pdf`` download link.
-       The best-matching abstract page is visited, and its first PDF link is
-       used.
+    2. **WordPress Download Manager** (CoB): download URLs are hidden in
+       ``onclick="location.href='…?wpdmdl=N'"`` with titles in ``<h3>``.
 
-    Returns the absolute PDF URL.  Raises ``ValueError`` on no match.
+    3. **Two-level repository** (KIPPRA abstract pages): the listing page links
+       to HTML pages, each of which holds the actual ``.pdf`` link.
+
+    Returns the absolute download URL.  Raises ``ValueError`` on no match.
     """
     html = fetch_html(listing_url)
     links = extract_links(html, listing_url)
@@ -106,6 +141,11 @@ def resolve_pdf_url(listing_url: str, source: dict) -> str:
     pdf_links = [l for l in links if l["is_pdf"]]
     if pdf_links:
         return select_pdf(pdf_links, source)
+
+    # WPDM downloads (CoB) — onclick download URLs, not plain .pdf anchors.
+    wpdm = extract_wpdm_downloads(html, listing_url)
+    if wpdm:
+        return select_pdf(wpdm, source)
 
     # No direct PDFs → two-level repository (KIPPRA-style).
     item_links = [l for l in links if not l["is_pdf"]]
@@ -119,7 +159,7 @@ def resolve_pdf_url(listing_url: str, source: dict) -> str:
     # scores highest against the matching item's anchor text.
     ranked = sorted(
         item_links,
-        key=lambda l: _score_link(l["title"], source),
+        key=lambda l: _score_link(l, source),
         reverse=True,
     )
     for item in ranked[:5]:
@@ -129,7 +169,7 @@ def resolve_pdf_url(listing_url: str, source: dict) -> str:
                 l["url"] for l in extract_links(abstract_html, item["url"]) if l["is_pdf"]
             ]
             if abstract_pdfs:
-                print(f"[scraper] resolved via abstract page: {item['title']} → {abstract_pdfs[0]}")
+                print(f"[scraper] resolved via abstract page: {item['title']} -> {abstract_pdfs[0]}")
                 return abstract_pdfs[0]
         except Exception as exc:  # noqa: BLE001 - try the next candidate
             print(f"[scraper] abstract page {item['url']} failed: {type(exc).__name__}")
@@ -146,8 +186,8 @@ def resolve_pdf_url(listing_url: str, source: dict) -> str:
 
 # Keywords that steer selection, derived from the source's metadata.
 _ARM_KEYWORDS = {
-    "executive": ["executive"],
-    "assembly": ["assembly"],
+    "executive": ["executive", "executives"],
+    "assembly": ["assembly", "assemblies"],
 }
 _REPORT_KEYWORDS = {
     "audit_report": ["audit"],
@@ -165,18 +205,28 @@ _EDITION_KEYWORDS = [
 ]
 
 
-def _score_link(link_title: str, source: dict) -> int:
-    """Score a link title against the source's metadata. Higher = better."""
-    text = link_title.lower()
+def _score_link(link: dict, source: dict) -> int:
+    """Score a link against the source's metadata. Higher = better.
+
+    Scores BOTH the anchor text and the URL/filename — many sites (OAG) use a
+    bare "Download" anchor where the filename carries the signal
+    ("GREEN-BOOK-EXECUTIVES-…").  Arm keyword matches score ABOVE title-token
+    overlap because a generic term like "county" appears in many titles and
+    must not beat the arm/type discriminator.
+    """
+    text = f"{link.get('title', '')} {link.get('url', '')}".lower()
     score = 0
 
-    title_tokens = set(re.findall(r"[a-z0-9]+", source["title"].lower()))
-    if title_tokens and title_tokens.intersection(re.findall(r"[a-z0-9]+", text)):
-        score += 10  # strong: words overlap with the source title
+    # Weighted title-token overlap: each shared word adds points, so
+    # "First Half" beats "First Quarter" for a "… First Half …" source even
+    # though both share "first".
+    src_tokens = set(re.findall(r"[a-z0-9]+", source["title"].lower()))
+    link_tokens = set(re.findall(r"[a-z0-9]+", text))
+    score += 2 * len(src_tokens.intersection(link_tokens))
 
     for kw in _ARM_KEYWORDS.get(source["government_arm"], []):
         if kw in text:
-            score += 5
+            score += 15  # strongest discriminator (executive vs assembly)
 
     for kw in _REPORT_KEYWORDS.get(source["report_type"], []):
         if kw in text:
@@ -199,7 +249,7 @@ def select_pdf(links: list[dict], source: dict) -> str:
         raise ValueError("Listing page contains no PDF links.")
 
     scored = sorted(
-        ((_score_link(l["title"], source), l) for l in links),
+        ((_score_link(l, source), l) for l in links),
         key=lambda pair: pair[0],
         reverse=True,
     )

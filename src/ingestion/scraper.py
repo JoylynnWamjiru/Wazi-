@@ -160,7 +160,7 @@ def _safe_suffix(content_disposition: str) -> str:
 # Download (with size limit, SSRF guard, User-Agent, and SHA-256 checksum)
 # ---------------------------------------------------------------------------
 
-def download_pdf(url: str, timeout: float = 120.0) -> tuple[Path, str]:
+def download_pdf(url: str, timeout: float = 600.0) -> tuple[Path, str]:
     """Download a PDF from *url* to a temporary file.
 
     Returns ``(file_path, sha256_hex)``.  The caller owns the temp file —
@@ -308,7 +308,7 @@ def _resolve_pdf(source_meta: dict) -> tuple[Path, str]:
     from src.ingestion.scraper_listing import resolve_pdf_url
 
     selected_url = resolve_pdf_url(url, source_meta)
-    print(f"[scraper] resolved listing page: {url} → {selected_url}")
+    print(f"[scraper] resolved listing page: {url} -> {selected_url}")
     return download_pdf(selected_url)
 
 
@@ -366,8 +366,8 @@ def ingest_source(source_id: int) -> dict:
     try:
         pdf_path, content_hash = _resolve_pdf(source_meta)
         print(
-            f"[scraper] downloaded → {pdf_path} "
-            f"({pdf_path.stat().st_size} bytes, sha256={content_hash[:12]}…)"
+            f"[scraper] downloaded -> {pdf_path} "
+            f"({pdf_path.stat().st_size} bytes, sha256={content_hash[:12]}...)"
         )
 
         stored = _run_pipeline(pdf_path, source_id, government_arm, county)
@@ -451,6 +451,14 @@ def ingest_url(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    # Windows consoles default to cp1252, which can't encode chars like '→'
+    # in progress prints — reconfigure stdout so those prints don't crash the
+    # run with a UnicodeEncodeError.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError, ValueError):
+        pass
+
     parser = argparse.ArgumentParser(
         description="Download + ingest a government PDF into Wazi's pgvector corpus.",
     )
