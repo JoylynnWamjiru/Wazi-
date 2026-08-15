@@ -24,6 +24,7 @@ number ever reaches here.
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from src.shared.database import get_session
 from src.shared.models import Dispute, DisputeStatus, Message
@@ -123,15 +124,27 @@ def create_dispute(message_id: int, user_id: int, reason: str | None = None) -> 
             )
 
         # Guards passed — record the dispute.
-        session.add(
-            Dispute(
-                message_id=message_id,
-                reported_by_user_id=user_id,
-                reason=reason,
-                status=DisputeStatus.PENDING_REVIEW,
+        try:
+            session.add(
+                Dispute(
+                    message_id=message_id,
+                    reported_by_user_id=user_id,
+                    reason=reason,
+                    status=DisputeStatus.PENDING_REVIEW,
+                )
             )
-        )
-        session.flush()
+            session.flush()
+        except IntegrityError:
+            # Race: another request inserted the same (message, reporter)
+            # between our dedup check and this insert.  The UNIQUE
+            # constraint caught it — treat as a duplicate, not a crash.
+            session.rollback()
+            count = distinct_reporter_count(session, message_id)
+            return _verdict(
+                False, "duplicate",
+                report_count=count,
+                flagged=count >= DIVERSITY_THRESHOLD,
+            )
 
         # 3. DIVERSITY (computed after insert, includes this report).
         count = distinct_reporter_count(session, message_id)

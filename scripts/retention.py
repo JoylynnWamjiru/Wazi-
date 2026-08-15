@@ -26,8 +26,10 @@ from sqlalchemy import func
 from src.shared.database import get_session
 from src.shared.models import Dispute, Message
 
-MESSAGE_RETENTION_DAYS = 90
-DISPUTE_RETENTION_DAYS = 365
+from src.shared import config
+
+MESSAGE_RETENTION_DAYS = config.CHAT_RETENTION_DAYS
+DISPUTE_RETENTION_DAYS = config.DISPUTE_RETENTION_DAYS
 
 
 def purge(

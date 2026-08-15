@@ -6,7 +6,7 @@ All endpoints require admin authentication.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import func
 
@@ -257,7 +257,11 @@ def delete_source(source_id: int, token: str = Depends(verify_admin)) -> dict:
 # POST /api/sources/{source_id}/ingest
 # ---------------------------------------------------------------------------
 @router.post("/{source_id}/ingest", status_code=status.HTTP_202_ACCEPTED)
-def trigger_ingestion(source_id: int, token: str = Depends(verify_admin)) -> dict:
+def trigger_ingestion(
+    source_id: int,
+    background: BackgroundTasks,
+    token: str = Depends(verify_admin),
+) -> dict:
     """Trigger manual ingestion for a source (runs in background)."""
     with get_session() as session:
         source = session.query(Source).filter_by(id=source_id).first()
@@ -270,12 +274,17 @@ def trigger_ingestion(source_id: int, token: str = Depends(verify_admin)) -> dic
                 detail=f"Source {source_id} is already being ingested (status: in_progress)",
             )
 
-        source.ingestion_status = IngestionStatus.IN_PROGRESS
-        session.flush()
+    # Queue the actual download + pipeline in a background thread so the
+    # admin doesn't wait 2+ minutes for a PDF download + embedding.
+    # NOTE: we do NOT set IN_PROGRESS here — ``ingest_source`` atomically
+    # claims the source (sets IN_PROGRESS) when the background task runs.
+    # Pre-setting it here would make the background task see IN_PROGRESS
+    # and skip, so ingestion would never actually run.
+    from src.ingestion.scraper import ingest_source
+    background.add_task(ingest_source, source_id)
 
-        # TODO: trigger actual scraper via background task once scheduler.py exists
-        return {
-            "source_id": source_id,
-            "ingestion_status": "in_progress",
-            "message": f"Ingestion started. Check status via GET /api/sources/{source_id}.",
-        }
+    return {
+        "source_id": source_id,
+        "ingestion_status": "in_progress",
+        "message": f"Ingestion started. Check status via GET /api/sources/{source_id}.",
+    }

@@ -1,6 +1,6 @@
 # Wazi API Reference
 
-> Version 0.1.0 · Base URL (VPS): `http://157.230.232.223` · Local: `http://localhost:8000`
+> Version 0.1.0 · Base URL (VPS): `http://157.230.232.223` · Local: `http://localhost:8502`
 
 Interactive docs are served live by the app:
 - **Swagger UI** — `/docs`
