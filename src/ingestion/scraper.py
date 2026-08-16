@@ -36,6 +36,7 @@ import ipaddress
 import re
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -160,18 +161,37 @@ def _safe_suffix(content_disposition: str) -> str:
 # Download (with size limit, SSRF guard, User-Agent, and SHA-256 checksum)
 # ---------------------------------------------------------------------------
 
-def download_pdf(url: str, timeout: float = 600.0) -> tuple[Path, str]:
-    """Download a PDF from *url* to a temporary file.
+def download_pdf(url: str, timeout: float = 600.0, retries: int = 3) -> tuple[Path, str]:
+    """Download a PDF from *url*, retrying transient network failures.
 
-    Returns ``(file_path, sha256_hex)``.  The caller owns the temp file —
-    delete it with ``Path.unlink()`` after ingestion.
+    Government servers are flaky (timeouts, connection resets, forced
+    closes).  Network-level errors are retried with exponential backoff
+    (1s, 2s, 4s); permanent errors (non-PDF content, oversized file) raise
+    immediately.
 
-    Enforces a ``MAX_PDF_BYTES`` size cap and validates the URL against
-    internal/private hosts before connecting.
+    Returns ``(file_path, sha256_hex)``.  The caller owns the temp file.
     """
     _validate_url(url)
 
-    # Stream so we don't buffer a 100 MB PDF into RAM.
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            return _download_pdf_once(url, timeout)
+        except (httpx.TransportError, OSError) as exc:
+            last_exc = exc
+            if attempt == retries - 1:
+                break
+            wait = 2 ** attempt
+            print(
+                f"[scraper] download attempt {attempt + 1} failed "
+                f"({type(exc).__name__}); retrying in {wait}s"
+            )
+            time.sleep(wait)
+    raise last_exc  # type: ignore[misc]
+
+
+def _download_pdf_once(url: str, timeout: float = 600.0) -> tuple[Path, str]:
+    """One download attempt: stream to a temp file, verify it's really a PDF."""
     with httpx.stream(
         "GET", url,
         follow_redirects=True,
@@ -180,7 +200,10 @@ def download_pdf(url: str, timeout: float = 600.0) -> tuple[Path, str]:
     ) as resp:
         resp.raise_for_status()
         content_type = resp.headers.get("content-type", "").lower()
-        if "pdf" not in content_type and not url.lower().endswith(".pdf"):
+        # Some servers (CoB) serve PDFs as application/octet-stream — accept
+        # it and verify the actual magic bytes after download.
+        acceptable = "pdf" in content_type or "octet-stream" in content_type
+        if not acceptable and not url.lower().endswith(".pdf"):
             raise ValueError(
                 f"URL does not appear to serve a PDF "
                 f"(Content-Type: {content_type}). "
@@ -190,6 +213,7 @@ def download_pdf(url: str, timeout: float = 600.0) -> tuple[Path, str]:
         suffix = _safe_suffix(resp.headers.get("content-disposition", ""))
 
         tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp_path = Path(tmp.name)
         sha = hashlib.sha256()
         total = 0
 
@@ -205,12 +229,23 @@ def download_pdf(url: str, timeout: float = 600.0) -> tuple[Path, str]:
                 tmp.write(chunk)
         except Exception:
             tmp.close()
-            Path(tmp.name).unlink(missing_ok=True)
+            tmp_path.unlink(missing_ok=True)
             raise
         finally:
             tmp.close()
 
-    return Path(tmp.name), sha.hexdigest()
+    # Verify the downloaded bytes really are a PDF — some servers return an
+    # HTML error page with a 200 + octet-stream content type.  Close the file
+    # BEFORE unlinking (Windows can't delete an open handle).
+    with open(tmp_path, "rb") as f:
+        magic = f.read(5)
+    if not magic.startswith(b"%PDF"):
+        tmp_path.unlink(missing_ok=True)
+        raise ValueError(
+            f"Downloaded file from {url} is not a PDF (missing %PDF magic bytes)."
+        )
+
+    return tmp_path, sha.hexdigest()
 
 
 # ---------------------------------------------------------------------------

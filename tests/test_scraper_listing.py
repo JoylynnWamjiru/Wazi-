@@ -153,6 +153,28 @@ def test_extract_county_section_falls_back_when_no_headings(tmp_path):
     assert len(pages) == 1
 
 
+def test_extract_county_section_matches_oag_heading_with_county_number(tmp_path):
+    """The real OAG heading is 'COUNTY EXECUTIVE OF NAKURU – NO.32' — the
+    trailing '– NO.32' must not break the county-name capture."""
+    import fitz
+
+    from src.ingestion.extract import extract_county_section
+
+    path = tmp_path / "oag.pdf"
+    doc = fitz.open()
+    p = doc.new_page()
+    p.insert_text((72, 72), "COUNTY EXECUTIVE OF NAKURU \u2013 NO.32")
+    p.insert_text((72, 100), "Report on the financial statements for Nakuru.")
+    p = doc.new_page()
+    p.insert_text((72, 72), "COUNTY EXECUTIVE OF NANDI \u2013 NO.33")
+    p.insert_text((72, 100), "Report on the financial statements for Nandi.")
+    doc.save(str(path))
+    doc.close()
+
+    pages = extract_county_section(str(path), county="nakuru")
+    assert [p["page"] for p in pages] == [1]
+
+
 def test_extract_county_section_returns_empty_for_missing_county(tmp_path):
     """A consolidated PDF that never mentions the target county → empty."""
     import fitz
