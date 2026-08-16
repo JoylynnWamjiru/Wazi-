@@ -274,3 +274,77 @@ def test_resolve_pdf_url_two_level_raises_when_no_pdf(monkeypatch):
     src = {"title": "A Document", "government_arm": "executive", "report_type": "cbrop"}
     with pytest.raises(ValueError, match="No abstract page"):
         scraper_listing.resolve_pdf_url("https://repo.example/handle/1", src)
+
+
+# ---------------------------------------------------------------------------
+# DSpace 7 REST client (KIPPRA)
+# ---------------------------------------------------------------------------
+
+def test_is_dspace_page_detects_shell():
+    from src.ingestion.scraper_listing import _is_dspace_page
+
+    assert _is_dspace_page("<html><body><ds-app></ds-app></body></html>") is True
+    assert _is_dspace_page("<html><title>DSpace</title></html>") is True
+    assert _is_dspace_page("<html><a href='/x.pdf'>download</a></html>") is False
+
+
+def test_handle_from_url_extracts_handle():
+    from src.ingestion.scraper_listing import _handle_from_url
+
+    assert _handle_from_url("https://repo.example/handle/123456789/939") == "123456789/939"
+    with pytest.raises(ValueError):
+        _handle_from_url("https://repo.example/collections/xyz")
+
+
+def test_resolve_dspace_pdf_url_full_chain(monkeypatch):
+    """The handle → collection → items → bundle → bitstream chain resolves to
+    the bitstream content URL, selecting the item matching the source title."""
+    from src.ingestion import scraper_listing
+
+    class FakeResp:
+        def __init__(self, status_code=200, headers=None, json_data=None):
+            self.status_code = status_code
+            self.headers = headers or {}
+            self._json = json_data or {}
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code}")
+
+        def json(self):
+            return self._json
+
+    def _ds_get(base, path, **kwargs):
+        if path == "/server/api/pid/find":
+            return FakeResp(
+                302,
+                headers={"location": "https://repo.example/server/api/core/collections/COL-UUID"},
+            )
+        if path == "/server/api/discover/search/objects":
+            return FakeResp(200, json_data={
+                "_embedded": {"searchResult": {"_embedded": {"objects": [
+                    {"_embedded": {"indexableObject": {"uuid": "ITEM-2023", "name": "Nakuru CBROP 2023"}}},
+                    {"_embedded": {"indexableObject": {"uuid": "ITEM-2024", "name": "Nakuru CBROP 2024"}}},
+                ]}}},
+            })
+        if path == "/server/api/core/items/ITEM-2024/bundles":
+            return FakeResp(200, json_data={
+                "_embedded": {"bundles": [
+                    {"uuid": "BUNDLE-ORIGINAL", "name": "ORIGINAL"},
+                    {"uuid": "BUNDLE-LICENSE", "name": "LICENSE"},
+                ]},
+            })
+        if path == "/server/api/core/bundles/BUNDLE-ORIGINAL/bitstreams":
+            return FakeResp(200, json_data={
+                "_embedded": {"bitstreams": [{"uuid": "BITSTREAM-PDF", "name": "nakuru-cbrop-2024.pdf"}]},
+            })
+        raise AssertionError(f"Unexpected path: {path}")
+
+    monkeypatch.setattr(scraper_listing, "_ds_get", _ds_get)
+
+    src = {"title": "Nakuru City County Budget Review and Outlook Paper 2024",
+           "government_arm": "executive", "report_type": "cbrop"}
+    url = scraper_listing.resolve_dspace_pdf_url(
+        "https://repo.example/handle/123456789/939", src
+    )
+    assert url == "https://repo.example/server/api/core/bitstreams/BITSTREAM-PDF/content"
