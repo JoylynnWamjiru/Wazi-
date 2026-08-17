@@ -13,15 +13,14 @@ import fitz  # PyMuPDF
 # effectively empty (blank, cover, or image-only page).
 MIN_PAGE_CHARS = 20
 
-# Matches a consolidated-report section heading on its OWN line.  Three
-# heading families exist in the corpus:
-#   - OAG:    "COUNTY EXECUTIVE OF NAKURU" / "COUNTY ASSEMBLY OF NAKURU"
+# Matches a consolidated-report section heading.  Three heading families exist:
+#   - OAG:    "COUNTY EXECUTIVE OF NAKURU – NO.32" (all caps + county number)
 #   - CoB BIRR: "County Government of Nakuru" (title case)
-# Anchored to the full line so the county name is exactly the rest of the
-# heading line (never bleeds into following body text).  Case-insensitive so
-# both the all-caps and title-case conventions match.
+# The county name is bounded by a non-letter (the en-dash in OAG's "– NO.32",
+# or end-of-line), so the [A-Za-z]+ capture naturally stops there — no need to
+# anchor the whole line.  Case-insensitive so title-case headings match too.
 _COUNTY_HEADING_RE = re.compile(
-    r"^\s*COUNTY\s+(?:EXECUTIVE|ASSEMBLY|GOVERNMENT)\s+OF\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)\s*$",
+    r"COUNTY\s+(?:EXECUTIVE|ASSEMBLY|GOVERNMENT)\s+OF\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)",
     re.IGNORECASE,
 )
 

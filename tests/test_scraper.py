@@ -347,3 +347,48 @@ def test_download_pdf_rejects_non_http_url():
 
     with pytest.raises(ValueError, match="Unsupported URL scheme"):
         download_pdf("ftp://example.com/report.pdf")
+
+
+def _mock_stream(monkeypatch, content_type: str, body: bytes):
+    """Make httpx.stream return a response with the given content-type and body."""
+    import httpx
+
+    from src.ingestion.scraper import download_pdf
+
+    class MockResponse:
+        headers = {"content-type": content_type, "content-disposition": ""}
+
+        def raise_for_status(self):
+            pass
+
+        def iter_bytes(self, chunk_size=8192):
+            for i in range(0, len(body), chunk_size):
+                yield body[i:i + chunk_size]
+
+    class _CM:
+        def __init__(self, resp): self._r = resp
+        def __enter__(self): return self._r
+        def __exit__(self, *a): pass
+
+    monkeypatch.setattr(httpx, "stream", lambda *a, **kw: _CM(MockResponse()))
+    return download_pdf
+
+
+def test_download_accepts_octet_stream_with_pdf_magic(monkeypatch, tmp_path):
+    """CoB serves PDFs as application/octet-stream — accept it when the bytes
+    start with %PDF."""
+    import os
+
+    download_pdf = _mock_stream(monkeypatch, "application/octet-stream", b"%PDF-1.7 fake body")
+    # Avoid hitting the SSRF/DNS guard: use a .pdf URL so no listing resolution.
+    path, sha = download_pdf("https://example.com/report.pdf")
+    assert path.exists()
+    assert sha == __import__("hashlib").sha256(b"%PDF-1.7 fake body").hexdigest()
+    path.unlink(missing_ok=True)
+
+
+def test_download_rejects_octet_stream_without_pdf_magic(monkeypatch):
+    """An HTML error page served as octet-stream must be rejected by magic bytes."""
+    download_pdf = _mock_stream(monkeypatch, "application/octet-stream", b"<html>error</html>")
+    with pytest.raises(ValueError, match="not a PDF"):
+        download_pdf("https://example.com/report.pdf")

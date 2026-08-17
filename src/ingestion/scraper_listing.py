@@ -14,7 +14,7 @@ matcher returns a ranked list of candidates, so a mismatch is a loud failure
 """
 
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -121,7 +121,7 @@ def extract_wpdm_downloads(html: str, base_url: str) -> list[dict]:
 def resolve_pdf_url(listing_url: str, source: dict) -> str:
     """Resolve a listing page to the one concrete PDF URL for *source*.
 
-    Handles three page structures:
+    Handles four page structures:
 
     1. **Direct PDF listing** (OAG): the listing page links straight to
        ``.pdf`` files — select the best match by keyword (the filename carries
@@ -130,12 +130,20 @@ def resolve_pdf_url(listing_url: str, source: dict) -> str:
     2. **WordPress Download Manager** (CoB): download URLs are hidden in
        ``onclick="location.href='…?wpdmdl=N'"`` with titles in ``<h3>``.
 
-    3. **Two-level repository** (KIPPRA abstract pages): the listing page links
-       to HTML pages, each of which holds the actual ``.pdf`` link.
+    3. **DSpace 7 repository** (KIPPRA): an Angular SPA whose content loads
+       via its REST API — resolved through ``resolve_dspace_pdf_url``.
+
+    4. **Two-level repository**: the listing page links to HTML pages, each of
+       which holds the actual ``.pdf`` link.
 
     Returns the absolute download URL.  Raises ``ValueError`` on no match.
     """
     html = fetch_html(listing_url)
+
+    # KIPPRA's DSpace 7 shell has no links — its content lives in /server/api.
+    if _is_dspace_page(html):
+        return resolve_dspace_pdf_url(listing_url, source)
+
     links = extract_links(html, listing_url)
 
     pdf_links = [l for l in links if l["is_pdf"]]
@@ -263,3 +271,108 @@ def select_pdf(links: list[dict], source: dict) -> str:
             f"Available links: {titles}"
         )
     return best_link["url"]
+
+
+# ---------------------------------------------------------------------------
+# DSpace 7 REST API (KIPPRA)
+# ---------------------------------------------------------------------------
+
+def _is_dspace_page(html: str) -> bool:
+    """True if *html* is a DSpace 7 Angular SPA shell (content loads via REST)."""
+    return "<ds-app" in html or "<title>DSpace</title>" in html[:500]
+
+
+def _dspace_base(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _handle_from_url(url: str) -> str:
+    """Extract the handle id from a ``.../handle/123456789/939`` URL."""
+    parsed = urlparse(url)
+    parts = [p for p in parsed.path.split("/") if p]
+    if "handle" in parts:
+        idx = parts.index("handle")
+        return "/".join(parts[idx + 1:])
+    raise ValueError(f"URL has no /handle/ path segment: {url}")
+
+
+def _ds_get(base: str, path: str, **kwargs) -> httpx.Response:
+    return httpx.get(
+        f"{base}{path}",
+        headers={"User-Agent": BROWSER_UA, "Accept": "application/json"},
+        timeout=60.0,
+        **kwargs,
+    )
+
+
+def resolve_dspace_pdf_url(listing_url: str, source: dict) -> str:
+    """Resolve a DSpace 7 repository listing to the PDF bitstream content URL.
+
+    Flow (all against the DSpace REST API at ``/server/api``):
+
+    1. ``/server/api/pid/find?id=hdl:<handle>`` → 302 to the collection.
+    2. ``/server/api/discover/search/objects?scope=<collection>`` → items.
+    3. Select the item whose title best matches the source (year included).
+    4. ``/core/items/<uuid>/bundles`` → the ORIGINAL bundle.
+    5. ``/core/bundles/<uuid>/bitstreams`` → the PDF bitstream.
+    6. Return ``/core/bitstreams/<uuid>/content`` — the actual PDF bytes.
+
+    Returns the bitstream content URL.  Raises ``ValueError`` on any missing
+    link in the chain (loud failure, never a wrong-document guess).
+    """
+    base = _dspace_base(listing_url)
+    handle = _handle_from_url(listing_url)
+
+    # 1. Handle → collection UUID (302 redirect).
+    resp = _ds_get(base, "/server/api/pid/find",
+                   params={"id": f"hdl:{handle}"}, follow_redirects=False)
+    if resp.status_code not in (302, 303):
+        resp.raise_for_status()
+    collection_url = resp.headers.get("location", "")
+    collection_uuid = collection_url.rstrip("/").rsplit("/", 1)[-1]
+
+    # 2. List the collection's items via discovery search.
+    resp = _ds_get(base, "/server/api/discover/search/objects",
+                   params={"query": "*", "scope": collection_uuid,
+                           "dsoType": "item", "size": 50})
+    resp.raise_for_status()
+    objects = resp.json()["_embedded"]["searchResult"]["_embedded"]["objects"]
+    items = [
+        {"uuid": o["_embedded"]["indexableObject"]["uuid"],
+         "name": o["_embedded"]["indexableObject"]["name"]}
+        for o in objects
+    ]
+    if not items:
+        raise ValueError(f"KIPPRA collection {collection_uuid} contains no items.")
+
+    # 3. Select the item matching the source title (reuses the same scorer,
+    #    so the fiscal year in the title disambiguates editions).
+    ranked = sorted(
+        items,
+        key=lambda it: _score_link({"title": it["name"], "url": ""}, source),
+        reverse=True,
+    )
+    item_uuid, item_name = ranked[0]["uuid"], ranked[0]["name"]
+    print(f"[scraper] KIPPRA item selected: {item_name}")
+
+    # 4. ORIGINAL bundle → PDF bitstream.
+    resp = _ds_get(base, f"/server/api/core/items/{item_uuid}/bundles")
+    resp.raise_for_status()
+    bundles = resp.json().get("_embedded", {}).get("bundles", [])
+    original = next((b for b in bundles if b.get("name") == "ORIGINAL"), None)
+    if original is None:
+        raise ValueError(f"KIPPRA item {item_uuid} has no ORIGINAL bundle.")
+
+    resp = _ds_get(base, f"/server/api/core/bundles/{original['uuid']}/bitstreams")
+    resp.raise_for_status()
+    bitstreams = resp.json().get("_embedded", {}).get("bitstreams", [])
+    pdf = next(
+        (b for b in bitstreams if b.get("name", "").lower().endswith(".pdf")),
+        bitstreams[0] if bitstreams else None,
+    )
+    if pdf is None:
+        raise ValueError(f"KIPPRA bundle {original['uuid']} has no bitstreams.")
+
+    # 5. Bitstream content URL — download_pdf will fetch the actual bytes.
+    return f"{base}/server/api/core/bitstreams/{pdf['uuid']}/content"
