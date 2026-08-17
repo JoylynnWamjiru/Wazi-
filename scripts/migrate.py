@@ -130,6 +130,22 @@ def migrate(dry_run: bool = False) -> dict:
                     "ALTER TABLE messages ADD COLUMN retrieved_chunks TEXT"
                 ))
 
+        # 5. Add full-text search column + GIN index for hybrid retrieval.
+        #    A generated column backfills existing rows automatically, so no
+        #    re-ingestion is needed after this migration.
+        if not column_exists(session, "chunks", "fts"):
+            report["actions"].append(
+                "ADD COLUMN chunks.fts tsvector (generated) + GIN index"
+            )
+            if not dry_run:
+                session.execute(text(
+                    "ALTER TABLE chunks ADD COLUMN fts tsvector GENERATED ALWAYS "
+                    "AS (to_tsvector('simple'::regconfig, chunk_text)) STORED"
+                ))
+                session.execute(text(
+                    "CREATE INDEX chunks_fts_gin ON chunks USING GIN (fts)"
+                ))
+
     return report
 
 
