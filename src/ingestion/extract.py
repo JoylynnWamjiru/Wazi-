@@ -13,24 +13,89 @@ import fitz  # PyMuPDF
 # effectively empty (blank, cover, or image-only page).
 MIN_PAGE_CHARS = 20
 
-# Matches a consolidated-report section heading.  Three heading families exist:
+# Matches a consolidated-report section heading.  Heading families:
 #   - OAG:    "COUNTY EXECUTIVE OF NAKURU – NO.32" (all caps + county number)
-#   - CoB BIRR: "County Government of Nakuru" (title case)
-# The county name is bounded by a non-letter (the en-dash in OAG's "– NO.32",
-# or end-of-line), so the [A-Za-z]+ capture naturally stops there — no need to
-# anchor the whole line.  Case-insensitive so title-case headings match too.
+#   - CoB BIRR: "3.31. County Government of Nakuru" (numbered, title case)
+# Body text uses the same words in running sentences ("...the County Executive
+# of Nakuru reported...") and must NOT be treated as a heading.  We therefore
+# (a) strip a leading section number, (b) require a short line, and (c) resolve
+# the county against a canonical list so the capture can never swallow trailing
+# body text.
 _COUNTY_HEADING_RE = re.compile(
-    r"COUNTY\s+(?:EXECUTIVE|ASSEMBLY|GOVERNMENT)\s+OF\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)",
+    r"COUNTY\s+(?:EXECUTIVE|ASSEMBLY|GOVERNMENT)\s+OF\s+(.+)",
     re.IGNORECASE,
 )
+
+# Leading section numbers ("3.31.", "3.31.1", "32.") on CoB/DSpace headings.
+_LEADING_NUM_RE = re.compile(r"^\s*(?:\d+(?:\.\d+)*\s*[.)]?\s+)")
+
+# A heading line longer than this many words is almost certainly body text
+# (e.g. "County Executive of Nakuru and War Memorial Hospital Management...").
+MAX_HEADING_WORDS = 7
+
+# The 47 counties of Kenya (plus the "Nairobi City" variant).  Names containing
+# apostrophes/hyphens/slashes are normalised to letters-only before matching so
+# "MURANG'A", "THARAKA-NITHI", "TAITA/TAVETA" and "ELGEYO/MARAKWET" all resolve
+# to their canonical form.
+_KENYAN_COUNTIES = [
+    "Baringo", "Bomet", "Bungoma", "Busia", "Elgeyo Marakwet", "Embu",
+    "Garissa", "Homa Bay", "Isiolo", "Kajiado", "Kakamega", "Kericho",
+    "Kiambu", "Kilifi", "Kirinyaga", "Kisii", "Kisumu", "Kitui", "Kwale",
+    "Laikipia", "Lamu", "Machakos", "Makueni", "Mandera", "Marsabit",
+    "Meru", "Migori", "Mombasa", "Murang'a", "Nairobi City", "Nairobi",
+    "Nakuru", "Nandi", "Narok", "Nyamira", "Nyandarua", "Nyeri", "Samburu",
+    "Siaya", "Taita Taveta", "Tana River", "Tharaka Nithi", "Trans Nzoia",
+    "Turkana", "Uasin Gishu", "Vihiga", "Wajir", "West Pokot",
+]
+
+
+def _norm(name: str) -> str:
+    """Normalise a name to letters-only lowercase for fuzzy matching."""
+    return re.sub(r"[^a-z]", "", name.lower())
+
+
+# Longest-first so "Nairobi City" wins over "Nairobi" as a prefix.
+_COUNTIES_NORM = sorted(
+    ((_norm(c), c) for c in _KENYAN_COUNTIES),
+    key=lambda pair: len(pair[0]),
+    reverse=True,
+)
+
+
+def _county_from_text(after_of: str) -> str | None:
+    """Resolve the text after "COUNTY ... OF" to a known county name.
+
+    The longest known county whose normalised form prefixes the normalised
+    text wins, so trailing junk ("Nakuru and War Memorial Hospital ...") is
+    ignored and punctuation variants ("TAITA/TAVETA") still match.
+    """
+    norm = _norm(after_of)
+    for norm_name, canonical in _COUNTIES_NORM:
+        if norm.startswith(norm_name):
+            return canonical
+    return None
 
 
 def _heading_county(text: str) -> str | None:
     """Return the county name from a standalone heading line, or None."""
-    for line in text.splitlines():
-        m = _COUNTY_HEADING_RE.match(line.strip())
-        if m is not None:
-            return " ".join(m.group(1).split())
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        # A heading can split across two text blocks: "COUNTY EXECUTIVE OF" /
+        # "NAKURU – NO.32".  Consider the line alone and joined with the next.
+        candidates = [line]
+        if i + 1 < len(lines):
+            candidates.append(f"{line} {lines[i + 1]}")
+        for candidate in candidates:
+            candidate = candidate.strip()
+            candidate = _LEADING_NUM_RE.sub("", candidate)
+            m = _COUNTY_HEADING_RE.match(candidate)
+            if m is None:
+                continue
+            if len(candidate.split()) > MAX_HEADING_WORDS:
+                continue
+            county = _county_from_text(m.group(1).strip())
+            if county is not None:
+                return county
     return None
 
 

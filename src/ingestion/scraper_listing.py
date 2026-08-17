@@ -205,10 +205,12 @@ _REPORT_KEYWORDS = {
     "programme_budget": ["programme", "budget estimates", "approved budget"],
 }
 # Edition terms for the BIRR quarterly family (Q1 / Half / Nine / Annual).
+# Spaced forms only — the link text is normalised to spaces before matching,
+# so a hyphenated URL ("first-nine-months") counts once, not twice.
 _EDITION_KEYWORDS = [
     "first quarter", "q1",
-    "half year", "half-year", "first half",
-    "nine months", "nine-months",
+    "half year", "first half",
+    "nine months",
     "annual",
 ]
 
@@ -223,6 +225,10 @@ def _score_link(link: dict, source: dict) -> int:
     must not beat the arm/type discriminator.
     """
     text = f"{link.get('title', '')} {link.get('url', '')}".lower()
+    # Normalise hyphens/slashes to spaces so keyword matching sees the same
+    # word forms the URL hyphenates ("first-nine-months" == "first nine months").
+    # This stops a Nine-Months link from double-counting its edition keyword.
+    text_norm = re.sub(r"[-/]", " ", text)
     score = 0
 
     # Weighted title-token overlap: each shared word adds points, so
@@ -233,15 +239,15 @@ def _score_link(link: dict, source: dict) -> int:
     score += 2 * len(src_tokens.intersection(link_tokens))
 
     for kw in _ARM_KEYWORDS.get(source["government_arm"], []):
-        if kw in text:
+        if kw in text_norm:
             score += 15  # strongest discriminator (executive vs assembly)
 
     for kw in _REPORT_KEYWORDS.get(source["report_type"], []):
-        if kw in text:
+        if kw in text_norm:
             score += 4
 
     for kw in _EDITION_KEYWORDS:
-        if kw in text:
+        if kw in text_norm:
             score += 3
 
     return score
