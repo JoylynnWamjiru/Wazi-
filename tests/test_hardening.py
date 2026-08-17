@@ -68,7 +68,9 @@ def test_parse_response_includes_retrieved_chunks():
     result = parse_response("Jibu.\nUSED_CHUNK: 1", chunks)
 
     assert result["chunks"] == chunks
-    assert result["citation"] == "source 1, page 3"
+    assert result["citation"] == (
+        "Auditor-General's Report — Nakuru County Executive, page 3"
+    )
     assert result["text"] == "Jibu."
 
 

@@ -8,12 +8,111 @@ Supports optional filtering by ``government_arm`` for disambiguation
 (e.g. Assembly vs. Executive audit reports).
 """
 
-from sqlalchemy import func, text
+import re
+
+from sqlalchemy import text
 
 from src.ingestion.embed import embed_texts
 from src.ingestion.normalize import normalize_query
 from src.shared.database import get_session
-from src.shared.models import Chunk, GovernmentArm
+from src.shared.models import GovernmentArm
+
+# Common English + Swahili function words dropped from the lexical query so
+# the full-text match is driven by content words and proper nouns.
+_LEX_STOPWORDS = frozenset({
+    "a", "an", "the", "of", "in", "on", "at", "for", "to", "and", "or",
+    "is", "are", "was", "were", "be", "been", "did", "does", "do", "has",
+    "have", "had", "what", "which", "who", "how", "when", "where", "why",
+    "much", "many", "this", "that", "these", "those", "it", "its", "about",
+    "with", "from", "their", "there", "they", "you", "your", "not", "no",
+    "status", "can", "could", "would", "should", "will", "all", "any",
+    "na", "ya", "za", "kwa", "cha", "hiyo", "hii", "ili", "kuhusu", "ngapi",
+    "nini", "gani", "je",
+})
+
+
+def _lexical_tsquery(query: str) -> str:
+    """OR-join the query's content words into a lenient tsquery."""
+    words = [
+        w for w in re.findall(r"[a-z0-9]+", query.lower())
+        if w not in _LEX_STOPWORDS
+    ]
+    return " | ".join(words)
+
+
+def _fts_search(
+    query: str,
+    k: int,
+    government_arm: GovernmentArm | None = None,
+) -> list[dict]:
+    """Lexical full-text search over ``chunks.fts`` for exact nouns/names.
+
+    Vector search matches concepts but misses exact proper nouns ("Njoro",
+    "Keringet"). PostgreSQL ``to_tsquery('simple', ...)`` OR-matches the
+    query's content words with no stemming, so a chunk naming the entity
+    surfaces even when its embedding similarity is diluted.
+    """
+    lexquery = _lexical_tsquery(query)
+    if not lexquery:
+        return []
+
+    conditions = ["c.fts @@ to_tsquery('simple', :lexquery)"]
+    params: dict = {"lexquery": lexquery, "k": k}
+    if government_arm is not None:
+        conditions.append("c.government_arm = :arm")
+        params["arm"] = government_arm.value
+    where = " AND ".join(conditions)
+
+    sql = text(f"""
+        SELECT
+            c.id as chunk_id,
+            c.source_id,
+            s.title AS source_title,
+            c.page_number,
+            c.chunk_text,
+            c.government_arm,
+            ts_rank(c.fts, to_tsquery('simple', :lexquery)) AS lexical_rank
+        FROM chunks c
+        JOIN sources s ON s.id = c.source_id
+        WHERE {where}
+        ORDER BY lexical_rank DESC
+        LIMIT :k
+    """)
+
+    with get_session() as session:
+        rows = session.execute(sql, params).fetchall()
+
+    return [
+        {
+            "chunk_id": r.chunk_id,
+            "source_id": r.source_id,
+            "source_title": r.source_title,
+            "page_number": r.page_number,
+            "chunk_text": r.chunk_text,
+            "government_arm": r.government_arm,
+            "similarity": 0.0,
+            "lexical_rank": round(float(r.lexical_rank), 4),
+        }
+        for r in rows
+    ]
+
+
+def _fuse(vector: list[dict], lexical: list[dict], k: int) -> list[dict]:
+    """Reciprocal Rank Fusion of semantic and lexical hits.
+
+    A chunk found by BOTH methods outranks one found by only one.  Chunks keep
+    their original dict shape; the caller never depends on ``similarity`` for
+    ordering after fusion.
+    """
+    scores: dict = {}
+    merged: dict = {}
+    for rank, chunk in enumerate(vector):
+        scores[chunk["chunk_id"]] = scores.get(chunk["chunk_id"], 0.0) + 1.0 / (60 + rank + 1)
+        merged[chunk["chunk_id"]] = chunk
+    for rank, chunk in enumerate(lexical):
+        scores[chunk["chunk_id"]] = scores.get(chunk["chunk_id"], 0.0) + 1.0 / (60 + rank + 1)
+        merged.setdefault(chunk["chunk_id"], chunk)
+    return sorted(merged.values(), key=lambda c: scores[c["chunk_id"]], reverse=True)[:k]
 
 
 def retrieve(
@@ -90,4 +189,14 @@ def retrieve(
                         "similarity": sim,
                     }
 
-    return sorted(best.values(), key=lambda r: r["similarity"], reverse=True)[:k]
+    vector_results = sorted(best.values(), key=lambda r: r["similarity"], reverse=True)[:k]
+
+    # Hybrid retrieval: merge semantic hits with lexical full-text hits so
+    # exact nouns surface even when their embedding similarity is weak.  If the
+    # fts column isn't present (pre-migration DB), fall back to vector-only.
+    try:
+        lexical = _fts_search(query, k, government_arm)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[retrieve] lexical search unavailable ({type(exc).__name__}), vector-only")
+        lexical = []
+    return _fuse(vector_results, lexical, k)

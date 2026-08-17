@@ -65,6 +65,33 @@ def test_result_shape_matches_pgvector_contract(local_corpus):
     assert isinstance(top["similarity"], float)
 
 
+def test_fuse_ranks_chunks_found_by_both_methods_first():
+    """Reciprocal Rank Fusion: a chunk found by BOTH vector and lexical
+    search outranks chunks found by only one."""
+    from src.ingestion.retrieve import _fuse
+
+    vector = [
+        {"chunk_id": 1, "similarity": 0.9},
+        {"chunk_id": 2, "similarity": 0.8},
+    ]
+    lexical = [
+        {"chunk_id": 2, "similarity": 0.0},  # found by both methods
+        {"chunk_id": 3, "similarity": 0.0},  # lexical-only
+    ]
+    fused = _fuse(vector, lexical, k=5)
+    ids = [c["chunk_id"] for c in fused]
+
+    assert ids[0] == 2          # both-method hit wins
+    assert set(ids) == {1, 2, 3}
+
+
+def test_fuse_falls_back_to_vector_only():
+    from src.ingestion.retrieve import _fuse
+
+    vector = [{"chunk_id": 1, "similarity": 0.9}]
+    assert [c["chunk_id"] for c in _fuse(vector, [], k=5)] == [1]
+
+
 def test_k_caps_the_number_of_results(local_corpus):
     assert len(retrieve_local.retrieve("topic 2", k=2)) == 2
     # k larger than the corpus returns everything, not an error.
