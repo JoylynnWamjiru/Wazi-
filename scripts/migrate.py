@@ -122,6 +122,14 @@ def migrate(dry_run: bool = False) -> dict:
                     "UNIQUE (message_id, reported_by_user_id)"
                 ))
 
+        # 4. Add retrieved-chunks snapshot column on messages (moderation loop).
+        if not column_exists(session, "messages", "retrieved_chunks"):
+            report["actions"].append("ADD COLUMN messages.retrieved_chunks TEXT")
+            if not dry_run:
+                session.execute(text(
+                    "ALTER TABLE messages ADD COLUMN retrieved_chunks TEXT"
+                ))
+
     return report
 
 

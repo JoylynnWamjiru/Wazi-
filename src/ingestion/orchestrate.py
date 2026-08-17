@@ -64,7 +64,9 @@ def get_response(query: str) -> dict:
 
     except Exception as exc:  # noqa: BLE001
         print(f"[get_response] falling back: {type(exc).__name__}: {exc}")
-        return dict(config.FALLBACK_ANSWERS["default"])
+        fallback = dict(config.FALLBACK_ANSWERS["default"])
+        fallback["chunks"] = []
+        return fallback
 
 
 # Backward-compat alias so Streamlit and webhook can import from here.

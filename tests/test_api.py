@@ -184,3 +184,79 @@ def test_disputes_list_after_a_report(api, seed):
     assert body["total"] == 1
     assert body["disputes"][0]["message_id"] == answer_id
     assert body["disputes"][0]["report_count"] == 1
+
+
+def test_get_dispute_returns_retrieved_passages(api, seed):
+    """The moderation view exposes the exact source passages the model was
+    shown — the human-verification loop's core evidence."""
+    import json
+
+    from src.api.middleware.anti_bot import create_dispute
+
+    client, headers = api
+    uid = seed.user("hash_y")
+    sid = seed.session(uid)
+    passages = [
+        {
+            "source_title": "Auditor-General's Report — Nakuru County Executive",
+            "page_number": 3,
+            "government_arm": "executive",
+            "chunk_text": "Kshs 14.13 bilioni",
+        }
+    ]
+    answer_id = seed.message(
+        sid, "assistant", "Kshs 14.13 bilioni", retrieved_chunks=json.dumps(passages)
+    )
+    assert create_dispute(answer_id, uid)["created"] is True
+
+    listed = client.get("/api/disputes", headers=headers).json()
+    dispute_id = listed["disputes"][0]["id"]
+
+    body = client.get(f"/api/disputes/{dispute_id}", headers=headers).json()
+    assert body["retrieved_chunks"] == passages
+    assert body["message_preview"]["text"] == "Kshs 14.13 bilioni"
+
+
+def test_escalation_report_packages_passages_as_proof(api, seed):
+    """Escalating a dispute packages the retrieved passages into the report,
+    so the recipient receives the source evidence alongside the answer."""
+    import json
+
+    from src.api.middleware.anti_bot import create_dispute
+
+    client, headers = api
+    uid = seed.user("hash_z")
+    sid = seed.session(uid)
+    passages = [
+        {
+            "source_title": "County Governments BIRR",
+            "page_number": 7,
+            "government_arm": "consolidated",
+            "chunk_text": "Pending bills stood at Kshs 2.1 bilioni.",
+        }
+    ]
+    answer_id = seed.message(
+        sid, "assistant", "Pending bills were Kshs 2.1 bilioni.",
+        retrieved_chunks=json.dumps(passages),
+    )
+    assert create_dispute(answer_id, uid)["created"] is True
+
+    listed = client.get("/api/disputes", headers=headers).json()
+    dispute_id = listed["disputes"][0]["id"]
+
+    # under_review -> escalated (valid transition chain).
+    client.patch(
+        f"/api/disputes/{dispute_id}",
+        json={"status": "under_review"},
+        headers=headers,
+    )
+    r = client.patch(
+        f"/api/disputes/{dispute_id}",
+        json={"status": "escalated", "escalation_recipient": "eacc@example.go.ke"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    report = r.json()["escalation_report"]
+    assert report["recipient"] == "eacc@example.go.ke"
+    assert report["content"]["retrieved_passages"] == passages
+    assert report["content"]["citation"] is None

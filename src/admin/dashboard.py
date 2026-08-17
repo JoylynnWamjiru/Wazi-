@@ -57,6 +57,17 @@ STATUS_BADGES = {
 GOVERNMENT_ARMS = ["executive", "assembly", "consolidated", "revenue"]
 REPORT_TYPES = ["audit_report", "birr", "exchequer", "cbrop", "programme_budget"]
 
+# Sidebar navigation — one page at a time in the main area (cleaner than five
+# tabs side-by-side; the demo's human-verification loop lives on Disputes).
+PAGES = ["Overview", "Disputes", "Sources", "Sessions", "Validation"]
+PAGE_ICONS = {
+    "Overview": "📊",
+    "Disputes": "🚩",
+    "Sources": "📚",
+    "Sessions": "💬",
+    "Validation": "🗣️",
+}
+
 st.set_page_config(page_title="Wazi Admin", page_icon="🛡️", layout="wide")
 
 
@@ -124,6 +135,13 @@ if "admin_token" not in st.session_state:
 
 with st.sidebar:
     st.markdown("### 🛡️ Wazi Admin")
+    page = st.radio(
+        "Navigate",
+        PAGES,
+        format_func=lambda p: f"{PAGE_ICONS[p]} {p}",
+        label_visibility="collapsed",
+    )
+    st.divider()
     try:
         health = httpx.get(f"{API_URL}/health", timeout=5.0).json()
         st.success(f"API healthy · {health.get('service', '?')}")
@@ -136,14 +154,10 @@ with st.sidebar:
 
 st.title("🛡️ Wazi Admin")
 
-tab_overview, tab_disputes, tab_sources, tab_sessions, tab_validation = st.tabs(
-    ["📊 Overview", "🚩 Disputes", "📚 Sources", "💬 Sessions", "🗣️ Validation"]
-)
-
 
 # --- Overview ----------------------------------------------------------------
 
-with tab_overview:
+if page == "Overview":
     stats = api_request("GET", "/api/stats")
     if stats:
         row1 = st.columns(4)
@@ -179,7 +193,7 @@ with tab_overview:
 
 # --- Disputes (moderation queue) ---------------------------------------------
 
-with tab_disputes:
+if page == "Disputes":
     filter_col, _ = st.columns([1, 3])
     with filter_col:
         status_filter = st.selectbox(
@@ -212,13 +226,19 @@ with tab_disputes:
                 st.caption(f"📄 {dispute['message_preview']['citation']}")
                 st.markdown("**Dispute reason**")
                 st.write(dispute["reason"])
-                with st.expander("Retrieved chunks (what the AI was shown)"):
-                    for chunk in dispute["retrieved_chunks"]:
-                        st.markdown(
-                            f"**{chunk['source_title']}** · p{chunk['page_number']} "
-                            f"· `{chunk['government_arm']}`"
+                with st.expander("Retrieved source passages (what the AI was shown)"):
+                    if dispute["retrieved_chunks"]:
+                        for chunk in dispute["retrieved_chunks"]:
+                            st.markdown(
+                                f"**{chunk['source_title']}** · p{chunk['page_number']} "
+                                f"· `{chunk['government_arm']}`"
+                            )
+                            st.text(chunk["chunk_text"])
+                    else:
+                        st.info(
+                            "Source passages aren't captured for this dispute yet — "
+                            "retrieval provenance isn't wired into the dispute flow."
                         )
-                        st.text(chunk["chunk_text"])
                 if dispute.get("resolution_note"):
                     st.markdown("**Resolution note**")
                     st.write(dispute["resolution_note"])
@@ -272,7 +292,7 @@ with tab_disputes:
 
 # --- Sources (registry) ------------------------------------------------------
 
-with tab_sources:
+if page == "Sources":
     sources = api_request("GET", "/api/sources")
     if sources:
         st.caption(f"{sources['total']} source(s) in the registry")
@@ -360,7 +380,7 @@ with tab_sources:
 
 # --- Sessions (conversation browser) -----------------------------------------
 
-with tab_sessions:
+if page == "Sessions":
     sessions = api_request("GET", "/api/sessions")
     if sessions and sessions["sessions"]:
         st.caption(
@@ -387,7 +407,7 @@ with tab_sessions:
 
 # --- Validation (placeholder) ------------------------------------------------
 
-with tab_validation:
+if page == "Validation":
     st.info(
         "Linguist validation (contract §5) is not implemented in the API yet — "
         "planned for Week 4 alongside prompt tuning. This tab will list answers "

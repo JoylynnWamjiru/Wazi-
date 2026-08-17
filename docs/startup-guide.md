@@ -214,6 +214,32 @@ curl http://localhost:8000/health
 ssh root@157.230.232.223 "journalctl -u wazi -n 50 --no-pager"
 ```
 
+### Watch live disputes/sessions (admin dashboard)
+
+The admin dashboard is a **local** Streamlit app that reads live VPS data over
+HTTP. Point it at the VPS and run it on your laptop:
+
+```powershell
+# One-off: point the dashboard at the live VPS API (or set this in .env)
+$env:WAZI_API_URL = "https://wazi.aibuildathon.dev"
+
+# Run from the repo root with the venv activated:
+.\venv\Scripts\python.exe -m streamlit run src/admin/dashboard.py --server.port 8503
+```
+
+Open `http://localhost:8503` and log in with the **VPS's** `ADMIN_PASSWORD`
+(the dashboard validates it against the backend — not your local `.env`):
+
+```powershell
+ssh root@157.230.232.223 "grep ADMIN_PASSWORD /opt/wazi/.env"
+```
+
+The sidebar's **Disputes** page is the human-verification loop: a moderator
+sees the citizen's question, the AI's answer + citation, and the retrieved
+source passages, then either resolves it (correction message) or escalates it
+(an anonymised escalation report is generated). **Sessions** shows live
+transcripts as real users message the bot.
+
 ### VPS database access
 
 ```bash

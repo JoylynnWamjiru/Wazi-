@@ -86,6 +86,7 @@ def retrieve(query: str, k: int = 8) -> list[dict]:
         results.append({
             "chunk_id": chunk.get("chunk_id"),
             "source_id": chunk.get("source"),  # filename -> readable citation
+            "source_title": chunk.get("source"),
             "page_number": chunk.get("page"),
             "chunk_text": chunk.get("text"),
             "government_arm": None,  # not tracked in the local corpus

@@ -25,6 +25,7 @@ the citizen sees two messages: the ack, then the answer.
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -291,11 +292,27 @@ async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> Non
         if msg is None:
             logger.error("Message %s not found — cannot store answer", message_id)
             return
+        chunks = (answer or {}).get("chunks", [])
         assistant_msg = Message(
             session_id=msg.session_id,
             role="assistant",
             text=reply,
             citation=answer.get("citation") if answer else None,
+            retrieved_chunks=(
+                json.dumps(
+                    [
+                        {
+                            "source_title": c.get("source_title"),
+                            "page_number": c.get("page_number"),
+                            "government_arm": c.get("government_arm"),
+                            "chunk_text": c.get("chunk_text"),
+                        }
+                        for c in chunks
+                    ]
+                )
+                if chunks
+                else None
+            ),
         )
         session.add(assistant_msg)
 

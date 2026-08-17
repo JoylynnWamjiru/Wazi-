@@ -127,4 +127,4 @@ def parse_response(raw: str, chunks: list[dict]) -> dict:
         top = chunks[0]
         citation = f"source {top['source_id']}, page {top['page_number']}"
 
-    return {"text": text, "citation": citation, "last_updated": "N/A"}
+    return {"text": text, "citation": citation, "last_updated": "N/A", "chunks": chunks}

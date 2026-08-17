@@ -87,9 +87,9 @@ def seed(db):
                 s.flush()
                 return sess.id
 
-        def message(self, session_id: int, role: str, text: str) -> int:
+        def message(self, session_id: int, role: str, text: str, **kwargs) -> int:
             with db.get_session() as s:
-                m = Message(session_id=session_id, role=role, text=text)
+                m = Message(session_id=session_id, role=role, text=text, **kwargs)
                 s.add(m)
                 s.flush()
                 return m.id

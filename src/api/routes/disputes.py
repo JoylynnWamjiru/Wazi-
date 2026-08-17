@@ -6,6 +6,7 @@ correction messages, and escalation report generation.
 All endpoints require admin authentication.
 """
 
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -173,9 +174,12 @@ def get_dispute(dispute_id: int, token: str = Depends(verify_admin)) -> dict:
             )
         result["user_question"] = {"text": user_msg.text} if user_msg else None
 
-        # Attach the retrieved chunks (placeholder — real data comes from
-        # the retrieval step once the pipeline stores chunk references).
-        result["retrieved_chunks"] = []
+        # Attach the retrieved source passages the model was shown.
+        result["retrieved_chunks"] = (
+            json.loads(message.retrieved_chunks)
+            if getattr(message, "retrieved_chunks", None)
+            else []
+        )
 
         return result
 
@@ -256,8 +260,18 @@ def update_dispute(
 
 
 def _generate_escalation_report(dispute: Dispute, recipient: str | None) -> dict:
-    """Generate an anonymized escalation report."""
+    """Generate an anonymized escalation report.
+
+    Packages the disputed answer, its citation, and the exact source passages
+    the model was shown — the proof the recipient needs to verify the source is
+    wrong — without any citizen identity.
+    """
     message = dispute.message
+    passages = (
+        json.loads(message.retrieved_chunks)
+        if getattr(message, "retrieved_chunks", None)
+        else []
+    )
     return {
         "dispute_id": dispute.id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -265,6 +279,7 @@ def _generate_escalation_report(dispute: Dispute, recipient: str | None) -> dict
         "content": {
             "disputed_answer": message.text[:500],
             "citation": message.citation,
+            "retrieved_passages": passages,
             "citizen_report": dispute.reason,
             "moderator_note": dispute.resolution_note,
         },

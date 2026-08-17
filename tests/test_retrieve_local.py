@@ -56,7 +56,7 @@ def test_ranks_the_matching_chunk_first(local_corpus):
 def test_result_shape_matches_pgvector_contract(local_corpus):
     top = retrieve_local.retrieve("topic 0", k=1)[0]
     assert set(top) == {
-        "chunk_id", "source_id", "page_number",
+        "chunk_id", "source_id", "source_title", "page_number",
         "chunk_text", "government_arm", "similarity",
     }
     assert top["chunk_id"] == "c0"

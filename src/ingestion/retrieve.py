@@ -60,11 +60,13 @@ def retrieve(
             SELECT
                 c.id as chunk_id,
                 c.source_id,
+                s.title AS source_title,
                 c.page_number,
                 c.chunk_text,
                 c.government_arm,
                 1 - (c.embedding <=> CAST(:embedding AS vector)) AS similarity
             FROM chunks c
+            JOIN sources s ON s.id = c.source_id
             WHERE {where_clause}
             ORDER BY c.embedding <=> CAST(:embedding AS vector)
             LIMIT :k
@@ -81,6 +83,7 @@ def retrieve(
                     best[row.chunk_id] = {
                         "chunk_id": row.chunk_id,
                         "source_id": row.source_id,
+                        "source_title": row.source_title,
                         "page_number": row.page_number,
                         "chunk_text": row.chunk_text,
                         "government_arm": row.government_arm,
