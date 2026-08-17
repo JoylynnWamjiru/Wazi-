@@ -51,6 +51,27 @@ def test_generate_wraps_query_in_delimiters(monkeypatch):
     assert "Kaunti inapokea pesa ngapi?" in captured_content
 
 
+def test_parse_response_includes_retrieved_chunks():
+    """parse_response propagates the retrieved chunks so the webhook can store
+    the source-passage snapshot on the assistant message."""
+    from src.ingestion.generate import parse_response
+
+    chunks = [
+        {
+            "source_id": 1,
+            "source_title": "Auditor-General's Report — Nakuru County Executive",
+            "page_number": 3,
+            "chunk_text": "Kshs 14.13 bilioni",
+            "government_arm": "executive",
+        }
+    ]
+    result = parse_response("Jibu.\nUSED_CHUNK: 1", chunks)
+
+    assert result["chunks"] == chunks
+    assert result["citation"] == "source 1, page 3"
+    assert result["text"] == "Jibu."
+
+
 # ---------------------------------------------------------------------------
 # Dispute — UNIQUE constraint behavior
 # ---------------------------------------------------------------------------

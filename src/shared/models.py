@@ -138,6 +138,10 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)  # "user" or "assistant"
     text: Mapped[str] = mapped_column(Text, nullable=False)
     citation: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # JSON snapshot of the chunks retrieval showed the model when it produced
+    # this answer. Stored denormalized so the moderation/escalation loop keeps
+    # an immutable record of "what the AI was shown" even after re-ingestion.
+    retrieved_chunks: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
