@@ -144,6 +144,51 @@ Already done via `scripts/vps_setup.sh`. This installed:
 - 2 GB swap (VPS has only 1 GB RAM)
 - PostgreSQL tuned for low RAM: `shared_buffers=128MB`
 
+### Full VPS startup sequence
+
+Bring the production stack up (cold start or after a deploy), end to end:
+
+```powershell
+# 1. SSH in
+ssh root@157.230.232.223
+
+# 2. Confirm PostgreSQL is up and pgvector is installed
+systemctl is-active postgresql
+sudo -u postgres psql -d wazi_db -c "SELECT count(*) FROM pg_extension WHERE extname='vector';"
+
+# 3. Pull the latest merged code and restart the API
+cd /opt/wazi && git pull origin main
+systemctl restart wazi
+systemctl is-active wazi                    # -> active
+
+# 4. Health checks (internal uvicorn, then public via Nginx)
+curl http://localhost:8000/health
+curl http://157.230.232.223/health          # -> {"status":"healthy"}
+
+# 5. Seed sources if the registry is empty (both idempotent)
+venv/bin/python scripts/migrate.py          # enum values, content_hash column
+venv/bin/python scripts/seed_db.py          # registers the 9 sources as PENDING
+
+# 6. Reset any FAILED sources before a bulk retry
+sudo -u postgres psql -d wazi_db -c "UPDATE sources SET ingestion_status='PENDING' WHERE ingestion_status='FAILED';"
+
+# 7. Run ingestion — one source, or every PENDING source
+venv/bin/python -m src.ingestion.scraper --source-id 8   # fast smoke test
+venv/bin/python -m src.ingestion.scraper --all           # full corpus (10–30 min)
+
+# 8. Verify chunks landed
+sudo -u postgres psql -d wazi_db -c "SELECT id, ingestion_status FROM sources ORDER BY id;"
+sudo -u postgres psql -d wazi_db -c "SELECT count(*) FROM chunks;"
+```
+
+Notes:
+- `ingestion_status` is a native enum whose **DB labels are uppercase**
+  (`PENDING`, `COMPLETED`, `FAILED`). The SQLAlchemy ORM translates its
+  lowercase values automatically, but **raw SQL must use uppercase**.
+- For a long bulk run, background it so it survives SSH disconnect:
+  `cd /opt/wazi && nohup venv/bin/python -m src.ingestion.scraper --all > scraper-all.log 2>&1 &`
+  then watch with `tail -f scraper-all.log`.
+
 ### Check VPS status
 
 ```powershell
@@ -183,15 +228,46 @@ sudo -u postgres psql -d wazi_db
 
 ### Point local apps at VPS database (optional)
 
-If you want to skip Docker and use the VPS database from your local machine,
-update `.env`:
+**Not currently enabled.** PostgreSQL on the VPS listens on `127.0.0.1:5432`
+only, and `ufw` allows just ports 22/80/443 — there is no 5432 rule. Local
+`.env` therefore still points at the Docker instance
+(`postgresql://wazi:wazi_password@localhost:5432/wazi_db`).
+
+To enable remote access you must, on the VPS:
+
+```bash
+# 1. Bind PostgreSQL to the public interface
+sudo sed -i "s/^#listen_addresses.*/listen_addresses = '*'/" /etc/postgresql/16/main/postgresql.conf
+
+# 2. Allow only your IP in client auth
+sudo sh -c 'echo "host wazi_db wazi YOUR_PUBLIC_IP/32 scram-sha-256" >> /etc/postgresql/16/main/pg_hba.conf'
+
+# 3. Open 5432 for your IP only
+sudo ufw allow from YOUR_PUBLIC_IP to any port 5432 proto tcp
+
+# 4. Reload
+sudo systemctl restart postgresql
+```
+
+Then set `.env` locally:
 
 ```
 DATABASE_URL=postgresql://wazi:wazi_password@157.230.232.223:5432/wazi_db
 ```
 
-Then no Docker is needed locally — but the VPS firewall must allow port 5432
-from your IP, and every query crosses the internet.
+**Recommended instead — SSH tunnel** (no firewall changes, encrypted, no
+internet exposure of PostgreSQL):
+
+```powershell
+# Terminal A (keep running): tunnel local 5433 -> VPS localhost:5432
+ssh -N -L 5433:localhost:5432 root@157.230.232.223
+
+# Terminal B: point .env at the tunnel
+#   DATABASE_URL=postgresql://wazi:wazi_password@localhost:5433/wazi_db
+```
+
+For scraping specifically, prefer running the scraper **on the VPS** (see
+"Full VPS startup sequence") — no remote database access is needed at all.
 
 ---
 
@@ -271,9 +347,8 @@ Open `http://localhost:8501`, ask:
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| pgvector has 0 chunks | All queries return "sina taarifa za kutosha" | Scraper not yet built — must ingest PDFs via admin dashboard or CLI |
-| `build_corpus()` writes chunks.json only | pgvector stays empty even after local ingest | `build_corpus()` is hackathon-era; scraper needed for pgvector |
-| Hardcoded PDF paths in `pipeline.py` | Only 2 PDFs recognized, must exist in `data/` | Migrate to scraper-based ingestion (see problem-statement.md) |
+| ~~pgvector empty / CoB BIRR failing~~ | — | **Fixed** (`fix/county-section-extraction`, commit `6de67b7`): 9/9 sources ingest (702 chunks). County resolved against a canonical 47-county list; body text no longer mis-detected as headings; BIRR edition (Q1/Half/Nine-Months) disambiguated |
+| `build_corpus()` / `pipeline.py` are hackathon-era | They write `chunks.json` and hardcoded paths, not pgvector | Replaced by `src/ingestion/scraper.py`; keep only for offline demo |
 | Admin dashboard default port is 8000 | `WAZI_API_URL` must be set in `.env` | Added `WAZI_API_URL=http://localhost:8502` to `.env` |
 | ONNX model download on first run | ~8 min wait for 127 MB download | One-time; subsequent runs use cached model |
 | VPS: uvicorn on port 8000 (behind Nginx) | Local uses 8502, VPS uses 8000 | Keep separate — VPS has its own `.env` and port convention |

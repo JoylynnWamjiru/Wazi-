@@ -89,6 +89,53 @@ def test_select_pdf_raises_when_nothing_matches():
         select_pdf(links, src)
 
 
+def test_select_pdf_edition_not_fooled_by_hyphenated_url():
+    """Real CoB URLs hyphenate the edition.  A Nine-Months link whose URL is
+    '...first-nine-months-of-fy-2025-26' must NOT double-count the edition
+    keyword and beat the correct Quarter link for a Quarter source."""
+    links = [
+        {
+            "title": "County Governments Budget Implementation Review Report for the first nine months of FY 2025/26",
+            "url": "https://cob.go.ke/download/county-governments-budget-implementation-review-report-for-the-first-nine-months-of-fy-2025-26/?wpdmdl=16378",
+        },
+        {
+            "title": "COUNTY GOVERNMENTS BUDGET IMPLEMENTATION REVIEW REPORT THE FIRST QUARTER OF FY 2025/26",
+            "url": "https://cob.go.ke/download/county-governments-budget-implementation-review-report-the-first-quarter-of-fy-2025-26/?wpdmdl=16380",
+        },
+    ]
+    src = {
+        "title": "County Governments BIRR — First Quarter FY 2025/26",
+        "government_arm": "consolidated",
+        "report_type": "birr",
+    }
+    assert select_pdf(links, src) == links[1]["url"]
+
+
+def test_select_pdf_edition_half_and_nine():
+    links = [
+        {
+            "title": "County Governments Budget Implementation Review Report for the first nine months of FY 2025/26",
+            "url": "https://cob.go.ke/download/county-governments-budget-implementation-review-report-for-the-first-nine-months-of-fy-2025-26/?wpdmdl=16378",
+        },
+        {
+            "title": "COUNTY GOVERNMENTS BUDGET IMPLEMENTATION REVIEW REPORT FIRST HALF OF FY 2025/26",
+            "url": "https://cob.go.ke/download/county-governments-budget-implementation-review-report-first-half-of-fy-2025-26/?wpdmdl=16379",
+        },
+    ]
+    half_src = {
+        "title": "County Governments BIRR — First Half FY 2025/26",
+        "government_arm": "consolidated",
+        "report_type": "birr",
+    }
+    nine_src = {
+        "title": "County Governments BIRR — First Nine Months FY 2025/26",
+        "government_arm": "consolidated",
+        "report_type": "birr",
+    }
+    assert select_pdf(links, half_src) == links[1]["url"]
+    assert select_pdf(links, nine_src) == links[0]["url"]
+
+
 def test_select_pdf_raises_for_empty_links():
     with pytest.raises(ValueError, match="no PDF links"):
         select_pdf([], {"title": "x", "government_arm": "executive", "report_type": "audit_report"})
