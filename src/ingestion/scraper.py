@@ -284,7 +284,11 @@ def _run_pipeline(
             f"is the county name spelled correctly in the document headings?"
         )
 
-    chunks = chunk_pages(pages)
+    # Chunk at ~250 words so a single audit finding (typically 100–300 words,
+    # e.g. "839.4 Stalled Construction … at Njoro Level 4 Hospital") lands in
+    # its own chunk. 500-word chunks dilute each finding's embedding across
+    # unrelated findings and made specific questions miss the right chunk.
+    chunks = chunk_pages(pages, chunk_size=250, overlap=50)
     stored = store_chunks(
         chunks,
         source_id=source_id,
