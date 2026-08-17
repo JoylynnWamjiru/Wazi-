@@ -347,8 +347,7 @@ Open `http://localhost:8501`, ask:
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| pgvector is 67% populated | 6 of 9 sources ingested (1,442 chunks); CoB BIRR questions return "sina taarifa za kutosha" | Run `scraper --all`; CoB BIRR extraction fix pending (below) |
-| CoB BIRR (sources 5–7) fail to ingest | "No pages found for county 'nakuru'" | Two bugs: `select_pdf` resolves Q1/Half-Year/Nine-Months all to the same Nine-Months PDF, and CoB county headings don't match the OAG "COUNTY EXECUTIVE OF X" regex |
+| ~~pgvector empty / CoB BIRR failing~~ | — | **Fixed** (`fix/county-section-extraction`, commit `6de67b7`): 9/9 sources ingest (702 chunks). County resolved against a canonical 47-county list; body text no longer mis-detected as headings; BIRR edition (Q1/Half/Nine-Months) disambiguated |
 | `build_corpus()` / `pipeline.py` are hackathon-era | They write `chunks.json` and hardcoded paths, not pgvector | Replaced by `src/ingestion/scraper.py`; keep only for offline demo |
 | Admin dashboard default port is 8000 | `WAZI_API_URL` must be set in `.env` | Added `WAZI_API_URL=http://localhost:8502` to `.env` |
 | ONNX model download on first run | ~8 min wait for 127 MB download | One-time; subsequent runs use cached model |
