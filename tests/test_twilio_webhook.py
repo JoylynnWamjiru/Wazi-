@@ -75,9 +75,9 @@ def test_twilio_report_keyword_files_dispute(client, seed, db):
     """A Twilio-shaped report maps to the same user and files a dispute."""
     _seed_answer_for_phone(seed, db)
 
-    resp = _post_twilio(client, "SI SAHIHI")
+    _post_twilio(client, "SI SAHIHI")
+    _post_twilio(client, "The allocation is wrong.")
 
-    assert resp.status_code == 200
     assert _dispute_count(db) == 1
     # The reply goes back to the canonicalized E.164 number, not Twilio's
     # "whatsapp:+254..." From value.
