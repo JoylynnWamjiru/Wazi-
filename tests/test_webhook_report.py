@@ -53,21 +53,40 @@ def _dispute_count(db) -> int:
 def test_report_keyword_files_a_dispute(client, seed, db):
     _seed_answer_for_phone(seed, db)
 
+    # 1. The keyword prompts for a reason — no dispute filed yet.
     resp = client.post("/whatsapp/incoming", data={"from": PHONE, "text": "SI SAHIHI"})
-
     assert resp.status_code == 200
+    assert _dispute_count(db) == 0
+
+    # 2. The follow-up reason files the dispute, with the reason stored.
+    client.post("/whatsapp/incoming", data={"from": PHONE, "text": "The figure is wrong."})
     assert _dispute_count(db) == 1
     assert any("Asante kwa kuripoti" in s["message"] for s in client.sent)
     assert any("Thank you for reporting" in s["message"] for s in client.sent)
+
+    from src.shared.models import Dispute
+    with db.get_session() as s:
+        assert s.query(Dispute).first().reason == "The figure is wrong."
+
+
+def test_report_prompts_for_reason_before_filing(client, seed, db):
+    _seed_answer_for_phone(seed, db)
+
+    client.post("/whatsapp/incoming", data={"from": PHONE, "text": "ripoti"})
+
+    prompt = client.sent[-1]["message"]
+    assert "why you think this answer is wrong" in prompt
+    assert "kwa nini unafikiri jibu hili si sahihi" in prompt
+    assert _dispute_count(db) == 0
 
 
 def test_single_report_reply_is_bilingual_and_does_not_imply_review(client, seed, db):
     _seed_answer_for_phone(seed, db)
 
-    resp = client.post("/whatsapp/incoming", data={"from": PHONE, "text": "si sahihi"})
+    client.post("/whatsapp/incoming", data={"from": PHONE, "text": "si sahihi"})
+    client.post("/whatsapp/incoming", data={"from": PHONE, "text": "The amount is wrong."})
 
-    assert resp.status_code == 200
-    reply = client.sent[0]["message"]
+    reply = client.sent[-1]["message"]  # the acknowledgment after the reason
     assert "Thank you for reporting" in reply
     assert "Tutakufahamisha" in reply          # "we will update you" (accurate)
     assert "Asante kwa kuripoti" in reply
@@ -87,9 +106,15 @@ def test_report_with_no_prior_answer_files_nothing(client, seed, db):
 def test_duplicate_report_is_rejected_with_a_message(client, seed, db):
     _seed_answer_for_phone(seed, db)
 
+    # First report + reason -> dispute created.
     client.post("/whatsapp/incoming", data={"from": PHONE, "text": "si sahihi"})
-    client.post("/whatsapp/incoming", data={"from": PHONE, "text": "si sahihi"})
+    client.post("/whatsapp/incoming", data={"from": PHONE, "text": "wrong figure"})
+    assert _dispute_count(db) == 1
 
-    assert _dispute_count(db) == 1  # second report did not create a row
+    # Second report + reason -> duplicate (no new row).
+    client.post("/whatsapp/incoming", data={"from": PHONE, "text": "si sahihi"})
+    client.post("/whatsapp/incoming", data={"from": PHONE, "text": "still wrong"})
+
+    assert _dispute_count(db) == 1
     assert any("Tayari ulisharipoti" in s["message"] for s in client.sent)
     assert any("You have already reported" in s["message"] for s in client.sent)

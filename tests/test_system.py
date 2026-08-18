@@ -218,8 +218,9 @@ def test_disputes_list_after_webhook_report(app, seed):
         s.add(Message(session_id=sess.id, role="assistant",
                       text="Jibu. Chanzo: test.pdf"))
 
-    # Report it.
+    # Report it, then give the reason (two-step flow).
     client.post("/whatsapp/incoming", data={"from": phone, "text": "si kweli"})
+    client.post("/whatsapp/incoming", data={"from": phone, "text": "The figure is wrong."})
 
     # Check disputes.
     r = client.get("/api/disputes", headers=headers)

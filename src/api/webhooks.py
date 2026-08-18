@@ -178,7 +178,7 @@ async def incoming_message(request: Request, background: BackgroundTasks):
             session.add(active_session)
             session.flush()
 
-        # Store the incoming message (question OR report keyword) for history.
+        # Store the incoming message (question, report keyword, or reason).
         user_msg = Message(
             session_id=active_session.id,
             role="user",
@@ -189,24 +189,51 @@ async def incoming_message(request: Request, background: BackgroundTasks):
         message_id = user_msg.id
 
         # A report targets the citizen's most recent assistant answer in
-        # this session — resolve it while the session is open.
-        target_answer_id = None
-        if is_report:
-            last_answer = (
-                session.query(Message)
-                .filter(
-                    Message.session_id == active_session.id,
-                    Message.role == "assistant",
-                )
-                .order_by(Message.id.desc())
-                .first()
+        # this session.
+        last_answer = (
+            session.query(Message)
+            .filter(
+                Message.session_id == active_session.id,
+                Message.role == "assistant",
             )
-            target_answer_id = last_answer.id if last_answer else None
-        # The context manager commits on exit — ids are now durable.
+            .order_by(Message.id.desc())
+            .first()
+        )
+        last_answer_id = last_answer.id if last_answer else None
 
-    # --- Dispute-report path -------------------------------------------------
-    if is_report:
-        reply = await asyncio.to_thread(_handle_report, user_db_id, target_answer_id)
+        # Two-step report state machine:
+        #   - a report keyword (re)prompts for a reason;
+        #   - the NEXT non-keyword message is the reason, and files the
+        #     dispute against the answer captured when the keyword arrived.
+        pending_target = active_session.pending_dispute_message_id
+        if is_report:
+            if last_answer_id is None:
+                action = ("no_answer", None)
+            else:
+                active_session.pending_dispute_message_id = last_answer_id
+                action = ("prompt_reason", None)
+        elif pending_target is not None:
+            active_session.pending_dispute_message_id = None
+            action = ("file_reason", pending_target)
+        else:
+            action = ("question", None)
+        # The context manager commits on exit — ids and state are durable.
+
+    # --- Report / reason paths ----------------------------------------------
+    if action[0] == "no_answer":
+        await send_whatsapp(
+            phone=raw_wa_id, message=_handle_report(user_db_id, None)
+        )
+        return Response(status_code=200)
+
+    if action[0] == "prompt_reason":
+        await send_whatsapp(phone=raw_wa_id, message=_REPORT_REASON_PROMPT)
+        return Response(status_code=200)
+
+    if action[0] == "file_reason":
+        reply = await asyncio.to_thread(
+            _handle_report, user_db_id, action[1], message_text
+        )
         await send_whatsapp(phone=raw_wa_id, message=reply)
         return Response(status_code=200)
 
@@ -236,14 +263,27 @@ def _bilingual(en: str, sw: str) -> str:
     return f"{en}\n{sw}"
 
 
+_REPORT_REASON_PROMPT = _bilingual(
+    "Thank you. Please tell us briefly why you think this answer is wrong.",
+    "Asante. Tafadhali tueleze kwa ufupi kwa nini unafikiri jibu hili si sahihi.",
+) + " 🙏"
+
+
 def _source_label(reply: str) -> str:
     """Choose the citation label to match the reply's language."""
     return "Chanzo" if detect_language(reply) == "sw" else "Source"
 
 
-def _handle_report(user_db_id: int, target_answer_id: int | None) -> str:
+def _handle_report(
+    user_db_id: int,
+    target_answer_id: int | None,
+    reason: str | None = None,
+) -> str:
     """File a dispute against the citizen's last answer, guarded by anti-bot
     checks.  Returns a bilingual citizen-facing reply for each outcome.
+
+    ``reason`` is the citizen's own words on why the answer is wrong (collected
+    via the two-step report flow); it falls back to a generic placeholder.
 
     A single report is recorded but NOT escalated for human review — only
     ``DIVERSITY_THRESHOLD`` distinct reporters surface it.  The reply must
@@ -262,7 +302,7 @@ def _handle_report(user_db_id: int, target_answer_id: int | None) -> str:
     verdict = create_dispute(
         message_id=target_answer_id,
         user_id=user_db_id,
-        reason="Citizen flagged answer via WhatsApp report keyword",
+        reason=reason or "Citizen flagged answer via WhatsApp report keyword",
     )
 
     if verdict["created"]:

@@ -192,6 +192,17 @@ def migrate(dry_run: bool = False) -> dict:
                     "ALTER TABLE disputes ADD COLUMN escalation_report TEXT"
                 ))
 
+        # 8. Two-step report flow: the pending "awaiting reason" pointer on a
+        #    session (which assistant answer the citizen is reporting).
+        if not column_exists(session, "sessions", "pending_dispute_message_id"):
+            report["actions"].append(
+                "ADD COLUMN sessions.pending_dispute_message_id INTEGER"
+            )
+            if not dry_run:
+                session.execute(text(
+                    "ALTER TABLE sessions ADD COLUMN pending_dispute_message_id INTEGER"
+                ))
+
     return report
 
 
