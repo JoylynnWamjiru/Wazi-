@@ -99,10 +99,106 @@ def _heading_county(text: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Table-aware text (ruled tables -> Markdown)
+# ---------------------------------------------------------------------------
+
+# PyMuPDF's default table detection (strategy="text") hallucinates tables out
+# of prose: on a 17-page OAG report it turned the "Basis for Qualified
+# Opinion" paragraph into a 48-row "table" with words split across columns
+# ("h flows|refl|ects Nil balan|ce").  The "lines" strategy only recognises
+# tables actually drawn with ruling lines — exactly what the OAG/CoB/county
+# budget PDFs use for figures — so we use that and ignore text-only "tables".
+_TABLE_STRATEGY = "lines"
+
+
+def _markdown_table(table) -> str:
+    """Render one PyMuPDF table to a Markdown table string.
+
+    PyMuPDF inserts ``<br>`` for wrapped cell text; we collapse those to a
+    space so embeddings read a cell as one phrase rather than
+    "Amount<br>as<br>per".
+    """
+    try:
+        md = table.to_markdown()
+    except Exception:  # pragma: no cover - defensive across PyMuPDF versions
+        return ""
+    if not md:
+        return ""
+    return md.replace("<br>", " ").replace("<br/>", " ").strip()
+
+
+def _block_inside_table(block_rect, table_rects) -> bool:
+    """True if more than half of *block_rect* lies inside any table rect."""
+    if block_rect.is_empty:
+        return False
+    for table_rect in table_rects:
+        inter = block_rect & table_rect
+        if not inter.is_empty:
+            if inter.get_area() / block_rect.get_area() > 0.5:
+                return True
+    return False
+
+
+def page_to_markdown(page) -> str:
+    """Return a page's text with ruled tables rendered as Markdown tables.
+
+    Table cell text is otherwise smeared together by ``page.get_text()`` (a
+    budget figure and its label end up far apart), which hurts retrieval.
+    Rendering tables as pipe-delimited Markdown keeps each row's label and
+    figure on one line, so chunk embeddings capture "what belongs to what".
+
+    Non-table prose is preserved as-is, and content order is reconstructed by
+    vertical then horizontal position so top-to-bottom, left-to-right reading
+    order survives.
+    """
+    text = page.get_text().strip()
+    # Fast path: a page with no vector drawings cannot contain ruled tables,
+    # so skip the expensive find_tables call for the common prose-only page.
+    try:
+        if not page.get_drawings():
+            return text
+        finder = page.find_tables(strategy=_TABLE_STRATEGY)
+    except Exception:  # pragma: no cover - some pages may fail; fall back
+        return text
+
+    tables: list[tuple[fitz.Rect, str]] = []
+    for table in finder.tables:
+        if not table.bbox:
+            continue
+        md = _markdown_table(table)
+        if md:
+            tables.append((fitz.Rect(table.bbox), md))
+    if not tables:
+        return text
+
+    table_rects = [rect for rect, _ in tables]
+    # Each item is keyed by (y0, x0) so the final sort reads top-to-bottom,
+    # then left-to-right.  Sorting by y0 alone scrambles side-by-side blocks
+    # and tables whose tops differ by a pixel or two; the x0 tie-break keeps
+    # a stable left-to-right order within a horizontal band.
+    items: list[tuple[tuple[float, float], str]] = []
+
+    for block in page.get_text("blocks", sort=True):
+        x0, y0, x1, y1, block_text, _block_no, _block_type = block
+        rect = fitz.Rect(x0, y0, x1, y1)
+        if _block_inside_table(rect, table_rects):
+            continue
+        if block_text.strip():
+            items.append(((y0, x0), block_text.strip()))
+
+    for rect, md in tables:
+        items.append(((rect.y0, rect.x0), md))
+
+    items.sort(key=lambda item: item[0])
+    return "\n\n".join(content for _, content in items)
+
+
 def extract_county_section(
     pdf_path: str,
     county: str = "nakuru",
     source: str | None = None,
+    tables: bool = True,
 ) -> list[dict]:
     """Extract only the pages belonging to one county's section.
 
@@ -122,7 +218,7 @@ def extract_county_section(
 
     with fitz.open(pdf_path) as doc:
         for index, page in enumerate(doc):
-            text = page.get_text().strip()
+            text = page_to_markdown(page) if tables else page.get_text().strip()
             if len(text) < MIN_PAGE_CHARS:
                 continue
 
@@ -141,7 +237,7 @@ def extract_county_section(
     # No county heading anywhere → a single-county (non-consolidated) PDF:
     # return every non-empty page.
     if not saw_heading:
-        return extract_pages(pdf_path)
+        return extract_pages(pdf_path, tables=tables)
 
     # Consolidated PDF — return the collected target-county pages (possibly
     # empty if the county simply wasn't present, which callers can detect).
@@ -164,8 +260,12 @@ def check_text_layer(pdf_path: str, pages_to_check: int = 5) -> bool:
     return False
 
 
-def extract_pages(pdf_path: str) -> list[dict]:
+def extract_pages(pdf_path: str, tables: bool = True) -> list[dict]:
     """Extract text per page from a PDF.
+
+    When ``tables`` is True (the default), ruled tables are rendered as
+    Markdown tables via :func:`page_to_markdown` so tabular figures stay
+    structured for retrieval.
 
     Returns a list of dicts, one per non-empty page::
 
@@ -178,7 +278,7 @@ def extract_pages(pdf_path: str) -> list[dict]:
     pages: list[dict] = []
     with fitz.open(pdf_path) as doc:
         for index, page in enumerate(doc):
-            text = page.get_text().strip()
+            text = page_to_markdown(page) if tables else page.get_text().strip()
             if len(text) < MIN_PAGE_CHARS:
                 continue
             pages.append({
