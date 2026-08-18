@@ -40,6 +40,7 @@ from src.api.messaging import (
 from src.api.middleware.identity import hash_wa_id
 from src.api.middleware.rate_limit import block_notice_limiter, webhook_limiter
 from src.shared.database import get_session
+from src.shared.language import detect_language
 from src.shared.models import Message, Session, User
 
 logger = logging.getLogger(__name__)
@@ -230,11 +231,31 @@ async def incoming_message(request: Request, background: BackgroundTasks):
     return Response(status_code=200)
 
 
+def _bilingual(en: str, sw: str) -> str:
+    """Join English and Swahili versions into one inclusive message."""
+    return f"{en}\n{sw}"
+
+
+def _source_label(reply: str) -> str:
+    """Choose the citation label to match the reply's language."""
+    return "Chanzo" if detect_language(reply) == "sw" else "Source"
+
+
 def _handle_report(user_db_id: int, target_answer_id: int | None) -> str:
     """File a dispute against the citizen's last answer, guarded by anti-bot
-    checks.  Returns the citizen-facing reply for each outcome."""
+    checks.  Returns a bilingual citizen-facing reply for each outcome.
+
+    A single report is recorded but NOT escalated for human review — only
+    ``DIVERSITY_THRESHOLD`` distinct reporters surface it.  The reply must
+    not imply otherwise.
+    """
+    no_recent = _bilingual(
+        "You have no recent answer to report. Please ask a question first.",
+        "Hakuna jibu la hivi karibuni la kuripoti. Uliza swali kwanza.",
+    ) + " 🙏"
+
     if target_answer_id is None:
-        return "Hakuna jibu la hivi karibuni la kuripoti. Uliza swali kwanza. 🙏"
+        return no_recent
 
     from src.api.middleware.anti_bot import create_dispute
 
@@ -246,19 +267,31 @@ def _handle_report(user_db_id: int, target_answer_id: int | None) -> str:
 
     if verdict["created"]:
         if verdict["flagged_for_review"]:
-            return (
+            return _bilingual(
+                "Thank you. This answer has been reported by several people "
+                "and will now be prioritized for review by a moderator.",
                 "Asante. Jibu hili limeripotiwa na watu kadhaa na sasa "
-                "litapewa kipaumbele cha ukaguzi na msimamizi. 🙏"
-            )
-        return "Asante kwa kuripoti. Jibu hili litakaguliwa na msimamizi. 🙏"
+                "litapewa kipaumbele cha ukaguzi na msimamizi.",
+            ) + " 🙏"
+        return _bilingual(
+            "Thank you for reporting. We will update you on the status of "
+            "this report.",
+            "Asante kwa kuripoti. Tutakufahamisha kuhusu hali ya ripoti hii.",
+        ) + " 🙏"
 
     if verdict["reason"] == "duplicate":
-        return "Tayari ulisharipoti jibu hili. Asante kwa msaada wako. 🙏"
+        return _bilingual(
+            "You have already reported this answer. Thank you.",
+            "Tayari ulisharipoti jibu hili. Asante kwa msaada wako.",
+        ) + " 🙏"
     if verdict["reason"] == "rate_limited":
         wait = int(verdict.get("retry_after") or 0)
-        return f"Tafadhali subiri sekunde {wait} kabla ya kuripoti tena."
+        return _bilingual(
+            f"Please wait {wait} seconds before reporting again.",
+            f"Tafadhali subiri sekunde {wait} kabla ya kuripoti tena.",
+        )
     # message_not_found / not_an_answer — shouldn't normally happen.
-    return "Hakuna jibu la hivi karibuni la kuripoti. Uliza swali kwanza. 🙏"
+    return no_recent
 
 
 async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> None:
@@ -280,7 +313,7 @@ async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> Non
         citation = answer.get("citation", "N/A")
 
         if citation and citation != "N/A":
-            reply += f"\n\n📄 Chanzo: {citation}"
+            reply += f"\n\n📄 {_source_label(reply)}: {citation}"
 
     except Exception:
         logger.exception("Pipeline failed for query: %s", query[:100])
