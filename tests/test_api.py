@@ -217,6 +217,26 @@ def test_get_dispute_returns_retrieved_passages(api, seed):
     assert body["message_preview"]["text"] == "Kshs 14.13 bilioni"
 
 
+def test_get_dispute_returns_user_question(api, seed):
+    """A real Q&A pair (user question followed by an answer) must load without
+    a DetachedInstanceError — the user question is read inside the session."""
+    from src.api.middleware.anti_bot import create_dispute
+
+    client, headers = api
+    uid = seed.user("hash_q")
+    sid = seed.session(uid)
+    seed.message(sid, "user", "Mradi wa Keringet iliendaje?")
+    answer_id = seed.message(sid, "assistant", "Ujenzi ulisimama.")
+    assert create_dispute(answer_id, uid)["created"] is True
+
+    listed = client.get("/api/disputes", headers=headers).json()
+    dispute_id = listed["disputes"][0]["id"]
+
+    body = client.get(f"/api/disputes/{dispute_id}", headers=headers).json()
+    assert body["user_question"]["text"] == "Mradi wa Keringet iliendaje?"
+    assert body["message_preview"]["text"] == "Ujenzi ulisimama."
+
+
 def test_escalation_report_packages_passages_as_proof(api, seed):
     """Escalating a dispute packages the retrieved passages into the report,
     so the recipient receives the source evidence alongside the answer."""

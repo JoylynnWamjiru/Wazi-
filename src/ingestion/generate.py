@@ -71,9 +71,10 @@ QUESTION: What is the weather forecast for Marsabit next week?
 ANSWER: sina taarifa za kutosha
 USED_CHUNK: none"""
 
-# Matches the marker the model appends: "USED_CHUNK: 2".
+# Matches the marker the model appends: "USED_CHUNK: 2" or "USED_CHUNK: 2, 1, 5"
+# (the model sometimes names several chunks).
 _USED_CHUNK_RE = re.compile(
-    r"^\s*USED_CHUNK:\s*(\d+|none)\s*$", re.IGNORECASE | re.MULTILINE
+    r"^\s*USED_CHUNK:\s*(\d+(?:\s*,\s*\d+)*|none)\s*$", re.IGNORECASE | re.MULTILINE
 )
 
 # Matches the model's own citation line so we strip it before display.
@@ -147,9 +148,11 @@ def parse_response(raw: str, chunks: list[dict]) -> dict:
 
     citation = "N/A"
     if match and match.group(1).lower() != "none":
-        idx = int(match.group(1)) - 1  # 1-indexed -> 0-indexed
-        if 0 <= idx < len(chunks):
-            citation = _citation_text(chunks[idx])
+        nums = [int(n) for n in re.findall(r"\d+", match.group(1))]
+        if nums:
+            idx = nums[0] - 1  # 1-indexed -> 0-indexed; cite the FIRST named chunk
+            if 0 <= idx < len(chunks):
+                citation = _citation_text(chunks[idx])
     elif match is None and chunks:
         citation = _citation_text(chunks[0])
 
