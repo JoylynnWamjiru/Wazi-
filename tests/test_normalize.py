@@ -78,3 +78,10 @@ def test_sheng_query_returns_original_plus_expanded_plus_english():
 
 def test_variants_never_empty():
     assert normalize_query("") == [""]
+
+
+def test_function_word_only_query_does_not_add_empty_variant():
+    # Every word maps to a dropped function word, so the translation is "".
+    # It must not be appended as an empty retrieval variant.
+    q = "ya za hii hiyo"
+    assert normalize_query(q) == [q]

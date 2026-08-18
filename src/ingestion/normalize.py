@@ -166,7 +166,7 @@ def normalize_query(query: str) -> list[str]:
     if expanded != query:
         variants.append(expanded)
     english = translate_to_english(expanded)
-    if english != query and english != expanded:
+    if english and english not in variants:
         variants.append(english)
     return variants
 
