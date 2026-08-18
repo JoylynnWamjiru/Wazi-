@@ -58,6 +58,20 @@ def test_report_keyword_files_a_dispute(client, seed, db):
     assert resp.status_code == 200
     assert _dispute_count(db) == 1
     assert any("Asante kwa kuripoti" in s["message"] for s in client.sent)
+    assert any("Thank you for reporting" in s["message"] for s in client.sent)
+
+
+def test_single_report_reply_is_bilingual_and_does_not_imply_review(client, seed, db):
+    _seed_answer_for_phone(seed, db)
+
+    resp = client.post("/whatsapp/incoming", data={"from": PHONE, "text": "si sahihi"})
+
+    assert resp.status_code == 200
+    reply = client.sent[0]["message"]
+    assert "Thank you for reporting" in reply
+    assert "Tutakufahamisha" in reply          # "we will update you" (accurate)
+    assert "Asante kwa kuripoti" in reply
+    assert "litakaguliwa na msimamizi" not in reply  # must not claim auto-review
 
 
 def test_report_with_no_prior_answer_files_nothing(client, seed, db):
@@ -67,6 +81,7 @@ def test_report_with_no_prior_answer_files_nothing(client, seed, db):
     assert resp.status_code == 200
     assert _dispute_count(db) == 0
     assert any("Hakuna jibu" in s["message"] for s in client.sent)
+    assert any("no recent answer" in s["message"] for s in client.sent)
 
 
 def test_duplicate_report_is_rejected_with_a_message(client, seed, db):
@@ -77,3 +92,4 @@ def test_duplicate_report_is_rejected_with_a_message(client, seed, db):
 
     assert _dispute_count(db) == 1  # second report did not create a row
     assert any("Tayari ulisharipoti" in s["message"] for s in client.sent)
+    assert any("You have already reported" in s["message"] for s in client.sent)
