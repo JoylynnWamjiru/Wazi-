@@ -66,6 +66,80 @@ _PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Swahili -> English, for cross-lingual retrieval. The corpus is English and
+# the multilingual embedder's Swahili<->English alignment is too weak for many
+# civic terms ("hospitali" vs "hospital", "pesa" vs "money"), so we translate
+# the content words deterministically and retrieve with the English variant too.
+SWAHILI_TO_ENGLISH: dict[str, str] = {
+    # question words / common verbs
+    "nini": "what",
+    "nani": "who",
+    "wapi": "where",
+    "lini": "when",
+    "gani": "which",
+    "ngapi": "how much",
+    "kulipwa": "paid",
+    "gharimu": "cost",
+    "uligharimu": "cost",
+    "iligharimu": "cost",
+    # Swahili function words — dropped (no English content value)
+    "hiyo": "",
+    "hii": "",
+    "ya": "",
+    "za": "",
+    "kwa": "",
+    "ilikuwa": "",
+    # civic / budget nouns
+    "hospitali": "hospital",
+    "pesa": "money cost",
+    "gharama": "cost",
+    "bei": "price",
+    "mradi": "project",
+    "miradi": "projects",
+    "kaunti": "county",
+    "barabara": "road",
+    "shule": "school",
+    "maji": "water",
+    "umeme": "electricity",
+    "mkataba": "contract",
+    "mwaka": "year",
+    "miaka": "years",
+    "serikali": "government",
+    "kiasi": "amount",
+    "malipo": "payments",
+    "bajeti": "budget",
+    "makadirio": "estimates",
+    "matumizi": "expenditure",
+    "mapato": "revenue",
+    "madeni": "debts",
+    "kazi": "work",
+    "ujenzi": "construction",
+    "afya": "health",
+    "elimu": "education",
+    "huduma": "services",
+    "ripoti": "report",
+    "ukaguzi": "audit",
+}
+
+_EN_KEYS_SORTED = sorted(SWAHILI_TO_ENGLISH, key=len, reverse=True)
+_EN_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in _EN_KEYS_SORTED) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def translate_to_english(query: str) -> str:
+    """Rewrite Swahili content words to English (word-level, case-insensitive).
+
+    Words not in the lexicon are untouched; Swahili function words are dropped.
+    An English query comes back unchanged.
+    """
+    def _sub(match: re.Match) -> str:
+        return SWAHILI_TO_ENGLISH[match.group(0).lower()]
+
+    translated = _EN_PATTERN.sub(_sub, query)
+    return re.sub(r"\s+", " ", translated).strip()
+
 
 def expand_sheng(query: str) -> str:
     """Rewrite known Sheng terms in ``query`` to standard Swahili.
@@ -82,14 +156,18 @@ def expand_sheng(query: str) -> str:
 def normalize_query(query: str) -> list[str]:
     """Return the query variants to embed for retrieval.
 
-    Always includes the original. Adds the lexicon-expanded form only if it
-    actually differs (i.e. the query contained a mapped term), so a query with
-    no mapped term returns a single variant and behaves exactly as before.
+    Always includes the original. Adds the Sheng->Swahili expansion when the
+    query contains a mapped term, and the Swahili->English translation when it
+    contains Swahili content words — so a Swahili query can match the English
+    corpus. A query with no mapped terms returns a single variant.
     """
     variants = [query]
     expanded = expand_sheng(query)
     if expanded != query:
         variants.append(expanded)
+    english = translate_to_english(expanded)
+    if english and english not in variants:
+        variants.append(english)
     return variants
 
 

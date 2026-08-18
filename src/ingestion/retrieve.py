@@ -97,21 +97,21 @@ def _fts_search(
     ]
 
 
-def _fuse(vector: list[dict], lexical: list[dict], k: int) -> list[dict]:
-    """Reciprocal Rank Fusion of semantic and lexical hits.
+def _fuse(*ranked_lists: list[dict], k: int) -> list[dict]:
+    """Reciprocal Rank Fusion over one or more ranked result lists.
 
-    A chunk found by BOTH methods outranks one found by only one.  Chunks keep
-    their original dict shape; the caller never depends on ``similarity`` for
+    Each list is a separate ranker (vector, Swahili lexical, English lexical).
+    A chunk found by several rankers sums its reciprocal ranks, so a chunk
+    matching multiple query variants outranks one matching only one.  Chunks
+    keep their original dict shape; callers never depend on ``similarity`` for
     ordering after fusion.
     """
     scores: dict = {}
     merged: dict = {}
-    for rank, chunk in enumerate(vector):
-        scores[chunk["chunk_id"]] = scores.get(chunk["chunk_id"], 0.0) + 1.0 / (60 + rank + 1)
-        merged[chunk["chunk_id"]] = chunk
-    for rank, chunk in enumerate(lexical):
-        scores[chunk["chunk_id"]] = scores.get(chunk["chunk_id"], 0.0) + 1.0 / (60 + rank + 1)
-        merged.setdefault(chunk["chunk_id"], chunk)
+    for ranked in ranked_lists:
+        for rank, chunk in enumerate(ranked):
+            scores[chunk["chunk_id"]] = scores.get(chunk["chunk_id"], 0.0) + 1.0 / (60 + rank + 1)
+            merged.setdefault(chunk["chunk_id"], chunk)
     return sorted(merged.values(), key=lambda c: scores[c["chunk_id"]], reverse=True)[:k]
 
 
@@ -192,11 +192,15 @@ def retrieve(
     vector_results = sorted(best.values(), key=lambda r: r["similarity"], reverse=True)[:k]
 
     # Hybrid retrieval: merge semantic hits with lexical full-text hits so
-    # exact nouns surface even when their embedding similarity is weak.  If the
-    # fts column isn't present (pre-migration DB), fall back to vector-only.
+    # exact nouns surface even when their embedding similarity is weak.  Run the
+    # lexical search on the MOST-ENGLISH variant (normalize_query's last item:
+    # the English translation for a Swahili/Sheng query, or the original for an
+    # English query) so it matches English corpus words ("hospital") rather than
+    # Swahili ones ("hospitali").  If the fts column isn't present, fall back
+    # to vector-only.
     try:
-        lexical = _fts_search(query, k, government_arm)
+        lexical = _fts_search(variants[-1], k, government_arm)
     except Exception as exc:  # noqa: BLE001
         print(f"[retrieve] lexical search unavailable ({type(exc).__name__}), vector-only")
         lexical = []
-    return _fuse(vector_results, lexical, k)
+    return _fuse(vector_results, lexical, k=k)
