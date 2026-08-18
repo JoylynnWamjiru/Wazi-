@@ -91,6 +91,24 @@ def test_extract_pages_can_disable_tables(tmp_path):
     assert "Basic Salaries" in joined  # text is still there, just unstructured
 
 
+def test_side_by_side_blocks_keep_left_to_right_order():
+    """Blocks at the same height must be emitted left-to-right.
+
+    Regression guard for the reading-order sort: keying by (y0, x0) rather
+    than y0 alone keeps side-by-side content in left-to-right order instead of
+    leaving it to near-tie ordering in y.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=300)
+    page.insert_text((50, 100), "LEFTCOLUMN", fontsize=12)
+    page.insert_text((250, 100), "RIGHTCOLUMN", fontsize=12)
+    text = page_to_markdown(page)
+    doc.close()
+
+    assert "LEFTCOLUMN" in text and "RIGHTCOLUMN" in text
+    assert text.index("LEFTCOLUMN") < text.index("RIGHTCOLUMN")
+
+
 # ---------------------------------------------------------------------------
 # Real corpus (skipped when data/ is absent) — integration check
 # ---------------------------------------------------------------------------

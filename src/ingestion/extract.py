@@ -149,10 +149,15 @@ def page_to_markdown(page) -> str:
     figure on one line, so chunk embeddings capture "what belongs to what".
 
     Non-table prose is preserved as-is, and content order is reconstructed by
-    vertical position so reading order survives.
+    vertical then horizontal position so top-to-bottom, left-to-right reading
+    order survives.
     """
     text = page.get_text().strip()
+    # Fast path: a page with no vector drawings cannot contain ruled tables,
+    # so skip the expensive find_tables call for the common prose-only page.
     try:
+        if not page.get_drawings():
+            return text
         finder = page.find_tables(strategy=_TABLE_STRATEGY)
     except Exception:  # pragma: no cover - some pages may fail; fall back
         return text
@@ -168,7 +173,11 @@ def page_to_markdown(page) -> str:
         return text
 
     table_rects = [rect for rect, _ in tables]
-    items: list[tuple[float, str]] = []
+    # Each item is keyed by (y0, x0) so the final sort reads top-to-bottom,
+    # then left-to-right.  Sorting by y0 alone scrambles side-by-side blocks
+    # and tables whose tops differ by a pixel or two; the x0 tie-break keeps
+    # a stable left-to-right order within a horizontal band.
+    items: list[tuple[tuple[float, float], str]] = []
 
     for block in page.get_text("blocks", sort=True):
         x0, y0, x1, y1, block_text, _block_no, _block_type = block
@@ -176,10 +185,10 @@ def page_to_markdown(page) -> str:
         if _block_inside_table(rect, table_rects):
             continue
         if block_text.strip():
-            items.append((y0, block_text.strip()))
+            items.append(((y0, x0), block_text.strip()))
 
     for rect, md in tables:
-        items.append((rect.y0, md))
+        items.append(((rect.y0, rect.x0), md))
 
     items.sort(key=lambda item: item[0])
     return "\n\n".join(content for _, content in items)
