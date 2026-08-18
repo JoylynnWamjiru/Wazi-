@@ -175,6 +175,11 @@ class Dispute(Base):
     status: Mapped[DisputeStatus] = mapped_column(
         Enum(DisputeStatus), default=DisputeStatus.PENDING_REVIEW, nullable=False
     )
+    # Denormalized moderation signals, kept in sync on every report by
+    # ``create_dispute``: how many DISTINCT identities have reported this
+    # answer, and whether that count has crossed the diversity threshold.
+    report_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    flagged_for_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)

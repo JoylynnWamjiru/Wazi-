@@ -30,6 +30,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from sqlalchemy import text
 
+from src.api.middleware.anti_bot import DIVERSITY_THRESHOLD
 from src.shared.database import _engine, get_session, init_db
 
 
@@ -145,6 +146,43 @@ def migrate(dry_run: bool = False) -> dict:
                 session.execute(text(
                     "CREATE INDEX chunks_fts_gin ON chunks USING GIN (fts)"
                 ))
+
+        # 6. Denormalized dispute moderation signals.  Backfill existing rows
+        #    from the (message_id, reporter) rows that already exist.
+        added_dispute_signal = False
+        if not column_exists(session, "disputes", "report_count"):
+            report["actions"].append(
+                "ADD COLUMN disputes.report_count INTEGER NOT NULL DEFAULT 1"
+            )
+            if not dry_run:
+                session.execute(text(
+                    "ALTER TABLE disputes ADD COLUMN report_count "
+                    "INTEGER NOT NULL DEFAULT 1"
+                ))
+            added_dispute_signal = True
+        if not column_exists(session, "disputes", "flagged_for_review"):
+            report["actions"].append(
+                "ADD COLUMN disputes.flagged_for_review BOOLEAN NOT NULL DEFAULT false"
+            )
+            if not dry_run:
+                session.execute(text(
+                    "ALTER TABLE disputes ADD COLUMN flagged_for_review "
+                    "BOOLEAN NOT NULL DEFAULT false"
+                ))
+            added_dispute_signal = True
+        if added_dispute_signal and not dry_run:
+            report["actions"].append(
+                "BACKFILL disputes.report_count + flagged_for_review"
+            )
+            session.execute(text(
+                "UPDATE disputes SET report_count = ("
+                "SELECT count(*) FROM disputes d2 "
+                "WHERE d2.message_id = disputes.message_id)"
+            ))
+            session.execute(text(
+                f"UPDATE disputes SET flagged_for_review = "
+                f"(report_count >= {DIVERSITY_THRESHOLD})"
+            ))
 
     return report
 

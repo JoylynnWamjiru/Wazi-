@@ -48,11 +48,11 @@ _TRANSITIONS: dict[DisputeStatus, list[DisputeStatus]] = {
 }
 
 
-def _dispute_to_dict(dispute: Dispute, report_count: int = 1) -> dict:
+def _dispute_to_dict(dispute: Dispute) -> dict:
     """Serialize a Dispute to the API contract shape.
 
-    ``report_count`` is pre-calculated in a batch query — do NOT call
-    _count_reports here, it would trigger N separate queries.
+    ``report_count`` and ``flagged_for_review`` are denormalized onto the row
+    by ``create_dispute``, so no extra queries are needed here.
     """
     return {
         "id": dispute.id,
@@ -60,26 +60,15 @@ def _dispute_to_dict(dispute: Dispute, report_count: int = 1) -> dict:
         "status": dispute.status.value,
         "reason": dispute.reason,
         "reported_by_user_id": dispute.reported_by_user_id,
+        "report_count": dispute.report_count,
+        "flagged_for_review": dispute.flagged_for_review,
         "reviewed_by": dispute.reviewed_by,
         "reviewed_at": dispute.reviewed_at.isoformat() if dispute.reviewed_at else None,
         "resolution_note": dispute.resolution_note,
         "correction_message": getattr(dispute, "correction_message", None),
         "escalation_report": getattr(dispute, "escalation_report", None),
         "created_at": dispute.created_at.isoformat(),
-        "report_count": report_count,
     }
-
-
-def _count_reports(dispute: Dispute) -> int:
-    """Count distinct users who reported the same message."""
-    # The ORM relationship gives us access to the session.
-    # For simplicity, count all disputes for the same message_id.
-    with get_session() as session:
-        return (
-            session.query(Dispute)
-            .filter(Dispute.message_id == dispute.message_id)
-            .count()
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -88,50 +77,51 @@ def _count_reports(dispute: Dispute) -> int:
 @router.get("")
 def list_disputes(
     dispute_status: str | None = None,
+    flagged: bool | None = None,
     limit: int = 50,
     offset: int = 0,
     token: str = Depends(verify_admin),
 ) -> dict:
-    """List disputes, newest first.  Optionally filter by status.
+    """List disputed answers, newest first.
 
-    Report counts are pre-calculated in a single GROUP BY query so
-    listing 50 disputes executes 2 queries total, not 51.
+    The queue is grouped by ``message_id`` — one entry per disputed answer,
+    represented by its earliest report.  ``flagged`` filters to answers that
+    have / have not crossed the diversity threshold.
     """
     with get_session() as session:
-        query = session.query(Dispute)
+        # One representative row per disputed answer: its earliest report.
+        # report_count / flagged_for_review are denormalized onto every row by
+        # create_dispute, so the representative already carries the aggregate.
+        reps = (
+            session.query(
+                Dispute.message_id,
+                func.min(Dispute.id).label("primary_id"),
+                func.max(Dispute.created_at).label("last_reported_at"),
+            )
+            .group_by(Dispute.message_id)
+            .subquery()
+        )
+        query = (
+            session.query(Dispute, reps.c.last_reported_at)
+            .join(reps, Dispute.id == reps.c.primary_id)
+        )
 
         if dispute_status:
             query = query.filter(Dispute.status == DisputeStatus(dispute_status))
+        if flagged is not None:
+            query = query.filter(Dispute.flagged_for_review.is_(flagged))
 
         total = query.count()
         rows = (
             query
-            .order_by(Dispute.created_at.desc())
+            .order_by(reps.c.last_reported_at.desc())
             .offset(offset)
             .limit(limit)
             .all()
         )
 
-        # Batch-fetch report counts: one query for all displayed disputes.
-        message_ids = [d.message_id for d in rows]
-        if message_ids:
-            counts = dict(
-                session.query(
-                    Dispute.message_id,
-                    func.count(Dispute.id).label("cnt"),
-                )
-                .filter(Dispute.message_id.in_(message_ids))
-                .group_by(Dispute.message_id)
-                .all()
-            )
-        else:
-            counts = {}
-
         return {
-            "disputes": [
-                _dispute_to_dict(d, report_count=counts.get(d.message_id, 1))
-                for d in rows
-            ],
+            "disputes": [_dispute_to_dict(d) for d, _last in rows],
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -149,7 +139,7 @@ def get_dispute(dispute_id: int, token: str = Depends(verify_admin)) -> dict:
         if dispute is None:
             raise HTTPException(status_code=404, detail=f"Dispute {dispute_id} not found")
 
-        result = _dispute_to_dict(dispute, report_count=_count_reports(dispute))
+        result = _dispute_to_dict(dispute)
 
         # Attach the disputed answer text.
         message = dispute.message
@@ -229,12 +219,27 @@ def update_dispute(
                 ),
             )
 
+        now = datetime.now(timezone.utc)
         dispute.status = new_status
         dispute.reviewed_by = "moderator"
-        dispute.reviewed_at = datetime.now(timezone.utc)
+        dispute.reviewed_at = now
 
         if body.resolution_note:
             dispute.resolution_note = body.resolution_note
+
+        # The queue groups reports by answer — keep every report row for this
+        # answer on the same status so the grouped view and per-status stats
+        # stay coherent.
+        sibling_updates = {
+            "status": new_status,
+            "reviewed_by": "moderator",
+            "reviewed_at": now,
+        }
+        if body.resolution_note:
+            sibling_updates["resolution_note"] = body.resolution_note
+        session.query(Dispute).filter(
+            Dispute.message_id == dispute.message_id
+        ).update(sibling_updates, synchronize_session=False)
 
         response: dict = {
             "id": dispute.id,
