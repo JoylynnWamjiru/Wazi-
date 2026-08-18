@@ -74,6 +74,22 @@ def test_parse_response_includes_retrieved_chunks():
     assert result["text"] == "Jibu."
 
 
+def test_parse_response_strips_multi_chunk_marker():
+    """The model sometimes emits 'USED_CHUNK: 2, 1, 5'. The marker must be
+    stripped and the citation taken from the FIRST named chunk."""
+    from src.ingestion.generate import parse_response
+
+    chunks = [
+        {"source_id": 1, "source_title": "Doc A", "page_number": 3, "chunk_text": "x"},
+        {"source_id": 1, "source_title": "Doc A", "page_number": 5, "chunk_text": "y"},
+    ]
+    result = parse_response("Jibu.\nUSED_CHUNK: 2, 1", chunks)
+
+    assert result["text"] == "Jibu."
+    assert "USED_CHUNK" not in result["text"]
+    assert result["citation"] == "Doc A, page 5"  # first named chunk is #2 -> chunks[1]
+
+
 # ---------------------------------------------------------------------------
 # Dispute — UNIQUE constraint behavior
 # ---------------------------------------------------------------------------

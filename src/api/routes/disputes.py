@@ -161,6 +161,9 @@ def get_dispute(dispute_id: int, token: str = Depends(verify_admin)) -> dict:
 
         # Attach the user's original question (text only, no identity).
         # The question is the message immediately before the assistant's answer.
+        # Read the text INSIDE the session: get_session() commits + closes on
+        # exit, which expires attributes — touching user_msg.text afterwards
+        # raises sqlalchemy.orm.exc.DetachedInstanceError.
         with get_session() as s2:
             user_msg = (
                 s2.query(Message)
@@ -172,7 +175,8 @@ def get_dispute(dispute_id: int, token: str = Depends(verify_admin)) -> dict:
                 .order_by(Message.id.desc())
                 .first()
             )
-        result["user_question"] = {"text": user_msg.text} if user_msg else None
+            question_text = user_msg.text if user_msg else None
+        result["user_question"] = {"text": question_text} if question_text else None
 
         # Attach the retrieved source passages the model was shown.
         result["retrieved_chunks"] = (
