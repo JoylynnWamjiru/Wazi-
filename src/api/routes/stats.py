@@ -42,17 +42,24 @@ def get_stats(token: str = Depends(verify_admin)) -> dict:
         for s in IngestionStatus:
             sources_by_status.setdefault(s.value, 0)
 
+        # The moderation queue is grouped by answer; count distinct disputed
+        # answers (not per-reporter rows), using each answer's earliest report
+        # as its representative status.
+        dispute_reps = (
+            session.query(func.min(Dispute.id).label("rid"))
+            .group_by(Dispute.message_id)
+            .subquery()
+        )
         dispute_status_rows = (
-            session.query(
-                Dispute.status,
-                func.count(Dispute.id).label("cnt"),
-            )
+            session.query(Dispute.status, func.count(Dispute.id).label("cnt"))
+            .join(dispute_reps, Dispute.id == dispute_reps.c.rid)
             .group_by(Dispute.status)
             .all()
         )
         disputes_by_status = {row[0].value: row[1] for row in dispute_status_rows}
         for d in DisputeStatus:
             disputes_by_status.setdefault(d.value, 0)
+        total_disputes = sum(disputes_by_status.values())
 
         # --- Date range of sources ---
         oldest = (
@@ -98,7 +105,7 @@ def get_stats(token: str = Depends(verify_admin)) -> dict:
             "sources_by_status": sources_by_status,
             "total_chunks": session.query(func.count(Chunk.id)).scalar(),
             "total_messages": session.query(func.count(Message.id)).scalar(),
-            "total_disputes": session.query(func.count(Dispute.id)).scalar(),
+            "total_disputes": total_disputes,
             "disputes_by_status": disputes_by_status,
             "last_ingestion_at": (
                 last_completed[0].isoformat() if last_completed else None

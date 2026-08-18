@@ -186,6 +186,50 @@ def test_disputes_list_after_a_report(api, seed):
     assert body["disputes"][0]["report_count"] == 1
 
 
+def test_disputes_list_groups_multiple_reporters(api, seed):
+    """The queue shows ONE entry per disputed answer, with the aggregate
+    distinct-reporter count — not one row per reporter."""
+    client, headers = api
+    from src.api.middleware.anti_bot import create_dispute
+
+    uid1 = seed.user("hash_a")
+    uid2 = seed.user("hash_b")
+    sid = seed.session(uid1)
+    answer_id = seed.message(sid, "assistant", "Kshs 14.13 bilioni")
+
+    assert create_dispute(answer_id, uid1)["created"] is True
+    assert create_dispute(answer_id, uid2)["created"] is True
+
+    body = client.get("/api/disputes", headers=headers).json()
+    assert body["total"] == 1
+    assert body["disputes"][0]["report_count"] == 2
+    assert body["disputes"][0]["flagged_for_review"] is False
+
+
+def test_disputes_flagged_filter(api, seed):
+    """`flagged` filters to answers that have crossed the diversity threshold."""
+    client, headers = api
+    from src.api.middleware.anti_bot import DIVERSITY_THRESHOLD, create_dispute
+
+    uids = [seed.user(f"hash_{i}") for i in range(DIVERSITY_THRESHOLD)]
+    sid = seed.session(uids[0])
+    answer_id = seed.message(sid, "assistant", "Kshs 14.13 bilioni")
+    for uid in uids:
+        assert create_dispute(answer_id, uid)["created"] is True
+
+    flagged = client.get(
+        "/api/disputes", params={"flagged": "true"}, headers=headers
+    ).json()
+    assert flagged["total"] == 1
+    assert flagged["disputes"][0]["report_count"] == DIVERSITY_THRESHOLD
+    assert flagged["disputes"][0]["flagged_for_review"] is True
+
+    unflagged = client.get(
+        "/api/disputes", params={"flagged": "false"}, headers=headers
+    ).json()
+    assert unflagged["total"] == 0
+
+
 def test_get_dispute_returns_retrieved_passages(api, seed):
     """The moderation view exposes the exact source passages the model was
     shown — the human-verification loop's core evidence."""

@@ -49,6 +49,13 @@ STATUS_BADGES = {
     "escalated": "🔴 escalated",
 }
 
+
+def _dispute_badge(d: dict) -> str:
+    """Badge for a dispute entry; visually downgrade sub-threshold reports."""
+    if d.get("status") == "pending_review" and not d.get("flagged_for_review", False):
+        return "🟡 awaiting_more_reports"
+    return STATUS_BADGES.get(d.get("status", ""), d.get("status", ""))
+
 # Mirror of the GovernmentArm / ReportType enums in src/shared/models.py, which
 # are the source of truth. Duplicated rather than imported because this
 # dashboard talks to the API over HTTP only — importing models.py would drag in
@@ -194,20 +201,32 @@ if page == "Overview":
 # --- Disputes (moderation queue) ---------------------------------------------
 
 if page == "Disputes":
-    filter_col, _ = st.columns([1, 3])
-    with filter_col:
+    queue_col, status_col, _ = st.columns([1, 1, 2])
+    with queue_col:
+        queue_filter = st.selectbox(
+            "Queue",
+            ["Flagged", "All", "Awaiting more"],
+            key="dispute_queue_filter",
+        )
+    with status_col:
         status_filter = st.selectbox(
-            "Filter by status",
+            "Status",
             ["(all)"] + list(DISPUTE_TRANSITIONS),
             key="dispute_filter",
         )
-    params = {} if status_filter == "(all)" else {"status": status_filter}
+    params = {}
+    if queue_filter == "Flagged":
+        params["flagged"] = "true"
+    elif queue_filter == "Awaiting more":
+        params["flagged"] = "false"
+    if status_filter != "(all)":
+        params["status"] = status_filter
     listing = api_request("GET", "/api/disputes", params=params)
 
     if listing and listing["disputes"]:
         st.caption(f"{listing['total']} dispute(s)")
         options = {
-            f"#{d['id']} · {STATUS_BADGES.get(d['status'], d['status'])} · "
+            f"#{d['id']} · {_dispute_badge(d)} · "
             f"{d['report_count']} report(s) · {d['reason'][:70]}": d["id"]
             for d in listing["disputes"]
         }
@@ -217,7 +236,7 @@ if page == "Disputes":
         if dispute:
             left, right = st.columns([3, 2])
             with left:
-                st.markdown(f"**Status:** {STATUS_BADGES.get(dispute['status'], dispute['status'])}"
+                st.markdown(f"**Status:** {_dispute_badge(dispute)}"
                             f" &nbsp;·&nbsp; **Reports:** {dispute['report_count']}")
                 st.markdown("**Citizen's question**")
                 st.info(dispute["user_question"]["text"])

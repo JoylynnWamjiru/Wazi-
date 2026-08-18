@@ -148,10 +148,18 @@ def create_dispute(message_id: int, user_id: int, reason: str | None = None) -> 
 
         # 3. DIVERSITY (computed after insert, includes this report).
         count = distinct_reporter_count(session, message_id)
+        flagged = count >= DIVERSITY_THRESHOLD
+        # Denormalize the aggregate onto EVERY row for this answer so the
+        # grouped moderation queue reads a single, current signal per answer
+        # without recomputing it.
+        session.query(Dispute).filter(Dispute.message_id == message_id).update(
+            {"report_count": count, "flagged_for_review": flagged},
+            synchronize_session=False,
+        )
         return _verdict(
             True, "created",
             report_count=count,
-            flagged=count >= DIVERSITY_THRESHOLD,
+            flagged=flagged,
         )
 
 
