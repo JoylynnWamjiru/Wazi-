@@ -229,9 +229,21 @@ def update_dispute(
         if body.resolution_note:
             dispute.resolution_note = body.resolution_note
 
+        # Generate the escalation report (if escalating) BEFORE the sibling
+        # update, so the saved JSON lands on EVERY report row for this answer
+        # — not just the representative the moderator clicked.
+        escalation_report: dict | None = None
+        escalation_json: str | None = None
+        if new_status == DisputeStatus.ESCALATED:
+            escalation_report = _generate_escalation_report(
+                dispute, body.escalation_recipient
+            )
+            escalation_json = json.dumps(escalation_report)
+            dispute.escalation_report = escalation_json
+
         # The queue groups reports by answer — keep every report row for this
-        # answer on the same status so the grouped view and per-status stats
-        # stay coherent.
+        # answer on the same status (and escalation report) so the grouped view
+        # and per-status stats stay coherent.
         sibling_updates = {
             "status": new_status,
             "reviewed_by": "moderator",
@@ -239,6 +251,8 @@ def update_dispute(
         }
         if body.resolution_note:
             sibling_updates["resolution_note"] = body.resolution_note
+        if escalation_json is not None:
+            sibling_updates["escalation_report"] = escalation_json
         session.query(Dispute).filter(
             Dispute.message_id == dispute.message_id
         ).update(sibling_updates, synchronize_session=False)
@@ -261,13 +275,9 @@ def update_dispute(
                 "Correction stored but not sent — AT send not yet wired to dispute flow."
             )
 
-        # Handle escalation — generate the anonymized report AND persist it so
-        # the moderation view can show the template + packaged proof after the
-        # fact (the email send itself is still manual).
-        if new_status == DisputeStatus.ESCALATED:
-            report = _generate_escalation_report(dispute, body.escalation_recipient)
-            dispute.escalation_report = json.dumps(report)
-            response["escalation_report"] = report
+        # The report was already persisted on every row above; echo it back.
+        if escalation_report is not None:
+            response["escalation_report"] = escalation_report
 
         session.flush()
         return response

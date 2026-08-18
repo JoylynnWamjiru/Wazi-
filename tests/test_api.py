@@ -330,3 +330,53 @@ def test_escalation_report_packages_passages_as_proof(api, seed):
     detail = client.get(f"/api/disputes/{dispute_id}", headers=headers).json()
     assert detail["escalation_report"]["recipient"] == "eacc@example.go.ke"
     assert detail["escalation_report"]["content"]["retrieved_passages"] == passages
+
+
+def test_escalation_report_persists_to_all_report_rows(api, seed, db):
+    """Escalating an answer that several citizens reported must save the JSON
+    report on EVERY report row, not just the representative the moderator
+    clicked (the grouped queue reads only the representative)."""
+    import json
+
+    from src.api.middleware.anti_bot import create_dispute
+    from src.shared.models import Dispute
+
+    client, headers = api
+    uid1 = seed.user("hash_e1")
+    uid2 = seed.user("hash_e2")
+    sid = seed.session(uid1)
+    passages = [
+        {
+            "source_title": "County Governments BIRR",
+            "page_number": 9,
+            "government_arm": "consolidated",
+            "chunk_text": "Allocation was Kshs 2.1 bilioni.",
+        }
+    ]
+    answer_id = seed.message(
+        sid, "assistant", "Kshs 2.1 bilioni.",
+        retrieved_chunks=json.dumps(passages),
+    )
+    assert create_dispute(answer_id, uid1)["created"] is True
+    assert create_dispute(answer_id, uid2)["created"] is True
+
+    listed = client.get("/api/disputes", headers=headers).json()
+    assert listed["total"] == 1  # grouped: one entry for two reports
+    dispute_id = listed["disputes"][0]["id"]
+
+    client.patch(
+        f"/api/disputes/{dispute_id}", json={"status": "under_review"}, headers=headers
+    )
+    r = client.patch(
+        f"/api/disputes/{dispute_id}",
+        json={"status": "escalated", "escalation_recipient": "eacc@example.go.ke"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+
+    with db.get_session() as s:
+        rows = s.query(Dispute).filter(Dispute.message_id == answer_id).all()
+        assert len(rows) == 2
+        for row in rows:
+            assert row.escalation_report is not None
+            assert "eacc@example.go.ke" in row.escalation_report
