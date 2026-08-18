@@ -25,6 +25,7 @@ beautifulsoup4
 
 # Admin UI
 streamlit
+streamlit-autorefresh
 
 # Dev / testing
 pytest

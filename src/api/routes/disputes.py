@@ -66,7 +66,9 @@ def _dispute_to_dict(dispute: Dispute) -> dict:
         "reviewed_at": dispute.reviewed_at.isoformat() if dispute.reviewed_at else None,
         "resolution_note": dispute.resolution_note,
         "correction_message": getattr(dispute, "correction_message", None),
-        "escalation_report": getattr(dispute, "escalation_report", None),
+        "escalation_report": (
+            json.loads(dispute.escalation_report) if dispute.escalation_report else None
+        ),
         "created_at": dispute.created_at.isoformat(),
     }
 
@@ -259,9 +261,12 @@ def update_dispute(
                 "Correction stored but not sent — AT send not yet wired to dispute flow."
             )
 
-        # Handle escalation.
+        # Handle escalation — generate the anonymized report AND persist it so
+        # the moderation view can show the template + packaged proof after the
+        # fact (the email send itself is still manual).
         if new_status == DisputeStatus.ESCALATED:
             report = _generate_escalation_report(dispute, body.escalation_recipient)
+            dispute.escalation_report = json.dumps(report)
             response["escalation_report"] = report
 
         session.flush()

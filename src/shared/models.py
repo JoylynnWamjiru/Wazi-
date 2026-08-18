@@ -183,6 +183,10 @@ class Dispute(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON snapshot of the generated escalation email (template + packaged
+    # source passages). Saved on escalate so the moderation view can show it
+    # after the fact; the actual email send is manual.
+    escalation_report: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

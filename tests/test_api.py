@@ -324,3 +324,9 @@ def test_escalation_report_packages_passages_as_proof(api, seed):
     assert report["recipient"] == "eacc@example.go.ke"
     assert report["content"]["retrieved_passages"] == passages
     assert report["content"]["citation"] is None
+
+    # The report is persisted and served by the detail view, so the dashboard
+    # can show the auto-generated template + packaged proof after a refresh.
+    detail = client.get(f"/api/disputes/{dispute_id}", headers=headers).json()
+    assert detail["escalation_report"]["recipient"] == "eacc@example.go.ke"
+    assert detail["escalation_report"]["content"]["retrieved_passages"] == passages
