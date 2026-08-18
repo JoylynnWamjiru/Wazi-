@@ -184,6 +184,14 @@ def migrate(dry_run: bool = False) -> dict:
                 f"(report_count >= {DIVERSITY_THRESHOLD})"
             ))
 
+        # 7. Escalation report snapshot (generated + saved as JSON on escalate).
+        if not column_exists(session, "disputes", "escalation_report"):
+            report["actions"].append("ADD COLUMN disputes.escalation_report TEXT")
+            if not dry_run:
+                session.execute(text(
+                    "ALTER TABLE disputes ADD COLUMN escalation_report TEXT"
+                ))
+
     return report
 
 

@@ -18,6 +18,7 @@ import os
 import httpx
 import streamlit as st
 from dotenv import load_dotenv
+from streamlit_autorefresh import st_autorefresh
 
 load_dotenv()
 
@@ -55,6 +56,11 @@ def _dispute_badge(d: dict) -> str:
     if d.get("status") == "pending_review" and not d.get("flagged_for_review", False):
         return "🟡 awaiting_more_reports"
     return STATUS_BADGES.get(d.get("status", ""), d.get("status", ""))
+
+
+# Escalation recipients shown in the dropdown. Add more as needed; the first
+# is EACC's public reporting inbox.
+ESCALATION_RECIPIENTS = ["report@integrity.go.ke"]
 
 # Mirror of the GovernmentArm / ReportType enums in src/shared/models.py, which
 # are the source of truth. Duplicated rather than imported because this
@@ -138,6 +144,14 @@ if "admin_token" not in st.session_state:
     st.stop()
 
 
+# --- Auto-refresh -----------------------------------------------------------
+# Rerun the script on a timer so new messages/disputes appear without a manual
+# reload. A rerun preserves session_state (unlike a browser refresh, which
+# drops it and forces re-login). The toggle lives in the sidebar below.
+_auto_refresh = st.session_state.get("auto_refresh", True)
+st_autorefresh(interval=10000 if _auto_refresh else 10**9, key="wazi_autorefresh")
+
+
 # --- Sidebar -----------------------------------------------------------------
 
 with st.sidebar:
@@ -149,6 +163,9 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.divider()
+    st.toggle("Auto-refresh (10s)", value=_auto_refresh, key="auto_refresh")
+    if st.button("🔄 Refresh now", use_container_width=True):
+        st.rerun()
     try:
         health = httpx.get(f"{API_URL}/health", timeout=5.0).json()
         st.success(f"API healthy · {health.get('service', '?')}")
@@ -201,6 +218,9 @@ if page == "Overview":
 # --- Disputes (moderation queue) ---------------------------------------------
 
 if page == "Disputes":
+    flash = st.session_state.pop("flash", None)
+    if flash:
+        st.success(flash)
     queue_col, status_col, _ = st.columns([1, 1, 2])
     with queue_col:
         queue_filter = st.selectbox(
@@ -265,8 +285,31 @@ if page == "Disputes":
                     st.markdown("**Correction sent to citizen**")
                     st.success(dispute["correction_message"])
                 if dispute.get("escalation_report"):
-                    with st.expander("Escalation report (send manually to recipient)"):
-                        st.json(dispute["escalation_report"])
+                    report = dispute["escalation_report"]
+                    recipient = (
+                        report.get("recipient") if isinstance(report, dict) else "(not specified)"
+                    )
+                    with st.expander("📧 Escalation email template (auto-generated)"):
+                        st.success(
+                            f"Template generated and saved as JSON. Send it manually "
+                            f"to **{recipient}** — outbound email is not yet wired."
+                        )
+                        st.markdown("**Source passages packaged as proof**")
+                        passages = (
+                            report.get("content", {}).get("retrieved_passages", [])
+                            if isinstance(report, dict) else []
+                        )
+                        if passages:
+                            for p in passages:
+                                st.markdown(
+                                    f"**{p.get('source_title')}** · p{p.get('page_number')} "
+                                    f"· `{p.get('government_arm')}`"
+                                )
+                                st.text(p.get("chunk_text"))
+                        else:
+                            st.caption("(no retrieved passages captured)")
+                        st.markdown("**Full JSON output (saved)**")
+                        st.json(report)
 
             with right:
                 st.markdown("**Moderation action**")
@@ -281,8 +324,9 @@ if page == "Disputes":
                             "Correction message (optional — sent to the citizen via WhatsApp; "
                             "only for resolved_* statuses)",
                         )
-                        recipient = st.text_input(
-                            "Escalation recipient email (only for escalated)",
+                        recipient = st.selectbox(
+                            "Escalation recipient (only for escalated)",
+                            ESCALATION_RECIPIENTS,
                         )
                         do_it = st.form_submit_button("Apply")
                     if do_it:
@@ -291,19 +335,23 @@ if page == "Disputes":
                             body["resolution_note"] = note.strip()
                         if correction.strip():
                             body["correction_message"] = correction.strip()
-                        if recipient.strip():
-                            body["escalation_recipient"] = recipient.strip()
+                        if new_status == "escalated":
+                            body["escalation_recipient"] = recipient
                         result = api_request(
                             "PATCH", f"/api/disputes/{dispute['id']}", json=body
                         )
                         if result:
-                            if result.get("correction_sent"):
-                                st.success("Status updated — correction sent to citizen.")
-                            elif result.get("escalation_report"):
-                                st.success("Escalated — report generated below.")
-                                st.json(result["escalation_report"])
+                            if result.get("escalation_report"):
+                                st.session_state["flash"] = (
+                                    "Escalated — email template generated and saved as "
+                                    "JSON. Send it manually to the recipient."
+                                )
+                            elif result.get("correction_sent"):
+                                st.session_state["flash"] = (
+                                    "Status updated — correction recorded (not sent)."
+                                )
                             else:
-                                st.success("Status updated.")
+                                st.session_state["flash"] = "Status updated."
                             st.rerun()
     elif listing:
         st.info("No disputes match this filter. 🎉")
