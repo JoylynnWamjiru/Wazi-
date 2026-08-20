@@ -31,7 +31,7 @@ from collections import OrderedDict
 import httpx
 
 from src.shared import config
-from src.shared.language import detect_language
+from src.shared.language import SWAHILI_MARKERS, detect_language
 from src.ingestion.normalize import SHENG_LEXICON, expand_sheng, translate_to_english
 
 # Strict single-purpose translation + query-expansion prompt.  The output is
@@ -78,16 +78,26 @@ _SLANG_SIGNAL = re.compile(
     re.IGNORECASE,
 )
 
+# Single-token Swahili markers that collide with common English abbreviations
+# ("na" = NA, "wa" = WA, "ni" = NI).  The query gate below uses a 1-hit
+# threshold, so these are excluded to avoid misclassifying an English query —
+# a real Swahili query virtually always carries another marker beyond these
+# function words.
+_AMBIGUOUS_SHORT_TOKENS = frozenset({"na", "wa", "ni"})
 
-def _looks_translatable(query: str) -> bool:
-    """True if the query is Swahili/Sheng and worth translating.
 
-    ``detect_language`` is tuned for *replies* and errs toward English for
-    short / vocabulary-poor text, so it misses pure-Sheng queries that carry no
-    Swahili function words ("Gava ilitumia doo ngapi?").  Those are caught by
-    the Sheng lexicon instead.
+def needs_translation(query: str) -> bool:
+    """Inverted query gate: assume translation is needed unless clearly English.
+
+    ``detect_language`` is tuned for *replies* (verbose paragraphs), where a
+    2-hit threshold survives abbreviations like "NA".  Queries are a different
+    shape: terse and often mixed-language, so a 2-hit gate would silently
+    bypass the LLM for "pesa ngapi" or "cost of that barabara" — exactly the
+    queries that most need query expansion.  A single Swahili/Sheng token is
+    therefore enough to trigger translation.
     """
-    if detect_language(query) == "sw":
+    words = re.findall(r"[a-z]+", query.lower())
+    if any(w in SWAHILI_MARKERS and w not in _AMBIGUOUS_SHORT_TOKENS for w in words):
         return True
     return bool(_SLANG_SIGNAL.search(query))
 
@@ -152,10 +162,11 @@ def translate_query(query: str) -> str:
     if mode == "off":
         return _lexicon_translate(query)
 
-    # English queries pass through untouched.  detect_language errs toward
-    # "en" for very short Swahili; those still get deterministic treatment
-    # inside retrieve() as a safety net.
-    if not _looks_translatable(query):
+    # English queries pass through untouched; anything Swahili/Sheng gets
+    # translated.  The gate is inverted (1-hit) because queries are terse —
+    # see needs_translation().  Short Swahili that slips through still gets
+    # deterministic treatment inside retrieve() as a safety net.
+    if not needs_translation(query):
         return query
 
     key = _cache_key(query)

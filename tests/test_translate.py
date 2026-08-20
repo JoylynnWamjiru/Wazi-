@@ -93,6 +93,32 @@ def test_sheng_query_is_translated(monkeypatch):
         "how much did the government spend?"
 
 
+def test_short_swahili_query_triggers_translation(monkeypatch):
+    # "pesa ngapi" has a single Swahili marker — the 2-hit reply detector would
+    # call it English, but the query gate must still fire the LLM.
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr(translate, "_llm_translate", lambda q: "how much money")
+    assert translate_query("pesa ngapi") == "how much money"
+
+
+def test_mixed_english_swahili_query_triggers_translation(monkeypatch):
+    # One Swahili content word inside an otherwise-English query must trigger
+    # translation, or "barabara" would never match the English "road".
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr(translate, "_llm_translate", lambda q: "cost of that road")
+    assert translate_query("cost of that barabara") == "cost of that road"
+
+
+def test_english_na_abbreviation_does_not_trigger_translation(monkeypatch):
+    # "NA" lowercases to "na", a Swahili marker — but the query gate excludes
+    # ambiguous 2-letter tokens so a data abbreviation doesn't fire the LLM.
+    calls = []
+    monkeypatch.setattr(translate, "_llm_translate", lambda q: calls.append(q) or "X")
+    q = "The value is NA for this line item"
+    assert translate_query(q) == q
+    assert calls == []
+
+
 def test_repeated_query_is_cached(monkeypatch):
     monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "test-key")
     calls = []
