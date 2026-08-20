@@ -51,11 +51,19 @@ _CLARIFY_MAX_WORDS = 10
 
 
 def _retrieval_is_weak(chunks: list[dict]) -> bool:
-    """True if retrieval found nothing confidently relevant."""
+    """True if retrieval found nothing confidently relevant.
+
+    "Confident" means EITHER a vector hit at/above the similarity threshold OR
+    a lexical (full-text) hit.  Lexical-only chunks carry ``similarity 0.0``
+    but a real ``lexical_rank`` — exact proper nouns ("Njoro", "Keringet")
+    often match only lexically, and must not be misread as weak.
+    """
     if not chunks:
         return True
-    best = max((c.get("similarity", 0.0) for c in chunks), default=0.0)
-    return best < _CLARIFY_SIM_THRESHOLD
+    best_sim = max((c.get("similarity", 0.0) for c in chunks), default=0.0)
+    if best_sim >= _CLARIFY_SIM_THRESHOLD:
+        return False
+    return not any(c.get("lexical_rank", 0.0) > 0 for c in chunks)
 
 
 def _retrieve(query: str, k: int) -> list[dict]:

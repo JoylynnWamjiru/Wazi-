@@ -76,6 +76,13 @@ def test_retrieval_is_weak_empty_and_low_and_high():
     assert orchestrate._retrieval_is_weak([{"similarity": 0.6}]) is False
 
 
+def test_retrieval_is_weak_lexical_only_hit_is_not_weak():
+    # A lexical (full-text) match carries similarity 0.0 but a real
+    # lexical_rank — exact proper nouns must not be misread as weak.
+    chunks = [{"chunk_id": 1, "similarity": 0.0, "lexical_rank": 0.5}]
+    assert orchestrate._retrieval_is_weak(chunks) is False
+
+
 def test_get_response_asks_clarification_when_retrieval_weak(monkeypatch):
     weak = [{"chunk_id": 1, "similarity": 0.1, "page_number": 1, "chunk_text": "x"}]
     monkeypatch.setattr(orchestrate, "check_value_for_money", lambda q: None)
