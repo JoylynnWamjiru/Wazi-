@@ -28,6 +28,10 @@ _SWAHILI_MARKERS = frozenset({
     "maji", "umeme", "uchunguzi",
 })
 
+# Public alias so query-gating code (src/ingestion/translate.py) can reuse the
+# same lexicon without importing the underscore-prefixed private name.
+SWAHILI_MARKERS = _SWAHILI_MARKERS
+
 # Number of marker hits that flips the classification to Swahili.  One hit is
 # too eager ("NA" -> "na" would flip short English replies); two is a strong
 # signal while still catching normal-length Swahili/Sheng sentences.

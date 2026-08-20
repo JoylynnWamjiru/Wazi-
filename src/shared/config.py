@@ -31,6 +31,15 @@ DATABASE_URL = os.getenv(
 #                the first failed connection)
 RETRIEVAL_BACKEND = os.getenv("RETRIEVAL_BACKEND", "auto").lower()
 
+# --- Query translation ---
+# How Swahili/Sheng queries are turned into English before retrieval (the
+# corpus is 100% English, so the retrieval string should be too):
+#   "auto"    — DeepSeek translation, falling back to the deterministic lexicon
+#   "lexicon" — deterministic Sheng->Swahili->English lexicon only (no LLM)
+#   "off"     — pass the query through unchanged (retrieve()'s own lexicon
+#               normalization still applies)
+QUERY_TRANSLATION = os.getenv("QUERY_TRANSLATION", "auto").lower()
+
 # --- Messaging provider ---
 # Which WhatsApp gateway the outbound layer uses:
 #   "africastalking" — Africa's Talking (default)
