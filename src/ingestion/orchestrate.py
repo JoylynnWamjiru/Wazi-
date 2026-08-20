@@ -17,6 +17,26 @@ from src.ingestion.vfm import check_value_for_money
 from src.shared import config
 from src.shared.messages import system_error
 
+# A follow-up with at most this many words is treated as a continuation of
+# the prior turn and anchored to it for retrieval ("how much did it cost?").
+_FOLLOWUP_MAX_WORDS = 5
+
+
+def _compose_retrieval_query(query: str, history: list[dict] | None) -> str:
+    """Anchor a terse follow-up to the most recent user turn for retrieval.
+
+    A follow-up like "how much did it cost?" is unretrievable on its own; the
+    prior turn supplies the entity ("what about Njoro hospital?").  Long,
+    self-contained questions are left untouched so a topic switch doesn't
+    inherit stale terms.
+    """
+    if not history or len(query.split()) > _FOLLOWUP_MAX_WORDS:
+        return query
+    prior_user = [m["text"] for m in history if m.get("role") == "user"]
+    if not prior_user:
+        return query
+    return f"{prior_user[-1]} {query}".strip()
+
 
 def _retrieve(query: str, k: int) -> list[dict]:
     """Retrieve chunks using the configured backend (``config.RETRIEVAL_BACKEND``).
@@ -43,14 +63,19 @@ def _retrieve(query: str, k: int) -> list[dict]:
         return retrieve_local.retrieve(query, k=k)
 
 
-def get_response(query: str) -> dict:
+def get_response(query: str, history: list[dict] | None = None) -> dict:
     """Answer a citizen question, grounded in pgvector chunks.
+
+    ``history`` is the recent conversation (``{"role", "text"}`` pairs) that
+    precedes ``query``, oldest first.  It is used two ways: a terse follow-up
+    is anchored to the prior user turn for retrieval, and the full history is
+    passed to the generator so the answer stays in context.
 
     Returns:
         ``{"text": ..., "citation": ..., "last_updated": ...}``
 
-    Any failure falls back to ``config.FALLBACK_ANSWERS`` rather than
-    raising — the citizen always gets a response, even if it's "I don't know."
+    Any failure falls back to a friendly, register-matched message rather than
+    raising — the citizen always gets a response.
     """
     try:
         # LLM-driven VFM check takes precedence over general RAG.
@@ -58,17 +83,16 @@ def get_response(query: str) -> dict:
         if vfm is not None:
             return vfm
 
-        # Translate Swahili/Sheng queries to English for retrieval.  The
-        # corpus is 100% English, so the retrieval string should be too — a
-        # better match here is the difference between a grounded answer and
-        # "sina taarifa".  The ORIGINAL query is still passed to generate()
-        # so the answer matches the citizen's register.
-        retrieval_query = translate_query(query)
+        # Anchor terse follow-ups to the prior turn, then translate Swahili/
+        # Sheng to English for retrieval.  The corpus is 100% English, so the
+        # retrieval string should be too.  The ORIGINAL query (plus history)
+        # is passed to generate() so the answer matches the citizen's register.
+        retrieval_query = translate_query(_compose_retrieval_query(query, history))
 
         # k=8: the pending-bills answer lives in a chunk that ranks ~#8;
         # at k=4 it was a false negative. Verified on the old pipeline.
         chunks = _retrieve(retrieval_query, k=8)
-        raw = generate(chunks, query)
+        raw = generate(chunks, query, history=history)
         return parse_response(raw, chunks)
 
     except Exception as exc:  # noqa: BLE001
