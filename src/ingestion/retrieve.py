@@ -48,15 +48,16 @@ def _fts_search(
     """Lexical full-text search over ``chunks.fts`` for exact nouns/names.
 
     Vector search matches concepts but misses exact proper nouns ("Njoro",
-    "Keringet"). PostgreSQL ``to_tsquery('simple', ...)`` OR-matches the
-    query's content words with no stemming, so a chunk naming the entity
-    surfaces even when its embedding similarity is diluted.
+    "Keringet"). PostgreSQL ``to_tsquery('english', ...)`` OR-matches the
+    query's content words WITH stemming, so "stall" also matches "stalled" and
+    a chunk naming the entity surfaces even when its embedding similarity is
+    diluted.
     """
     lexquery = _lexical_tsquery(query)
     if not lexquery:
         return []
 
-    conditions = ["c.fts @@ to_tsquery('simple', :lexquery)"]
+    conditions = ["c.fts @@ to_tsquery('english', :lexquery)"]
     params: dict = {"lexquery": lexquery, "k": k}
     if government_arm is not None:
         conditions.append("c.government_arm = :arm")
@@ -71,7 +72,7 @@ def _fts_search(
             c.page_number,
             c.chunk_text,
             c.government_arm,
-            ts_rank(c.fts, to_tsquery('simple', :lexquery)) AS lexical_rank
+            ts_rank(c.fts, to_tsquery('english', :lexquery)) AS lexical_rank
         FROM chunks c
         JOIN sources s ON s.id = c.source_id
         WHERE {where}

@@ -9,6 +9,10 @@ def _page(source: str, page: int, n_words: int) -> dict:
     return {"source": source, "page": page, "text": " ".join(f"w{i}" for i in range(n_words))}
 
 
+def _page_text(text: str) -> dict:
+    return {"source": "audit.pdf", "page": 1, "text": text}
+
+
 def test_chunk_ids_follow_source_page_index_scheme():
     chunks = chunk_pages([_page("nakuru_audit_report.pdf", 12, 30)], chunk_size=10, overlap=2)
     assert chunks[0]["chunk_id"] == "nakuru_audit_report_p12_c0"
@@ -49,3 +53,33 @@ def test_empty_pages_are_skipped():
 def test_invalid_parameters_raise(chunk_size, overlap):
     with pytest.raises(ValueError):
         chunk_pages([_page("doc.pdf", 1, 5)], chunk_size=chunk_size, overlap=overlap)
+
+
+def test_section_heading_forces_hard_chunk_boundary():
+    # Two short sections that would otherwise merge into one 50-word window.
+    text = (
+        "665. Supply, Installation " + " ".join(f"a{i}" for i in range(8)) +
+        " 839.4. Stalled Construction of Outpatient Block at Njoro Level 4 Hospital " +
+        " ".join(f"b{i}" for i in range(8))
+    )
+    chunks = chunk_pages([_page_text(text)], chunk_size=50, overlap=0)
+    # The second section must start its own chunk even though the total is
+    # well under chunk_size words.
+    assert any(c["text"].startswith("839.4.") for c in chunks)
+    # And no single chunk should span both headings.
+    for c in chunks:
+        assert not ("665." in c["text"] and "839.4." in c["text"])
+
+
+def test_heading_detection_ignores_money_and_decimal_figures():
+    text = "The contract sum was Kshs. 148,902,024 and 10.5 million more was spent."
+    chunks = chunk_pages([_page_text(text)], chunk_size=50, overlap=0)
+    # No heading-like token — must remain a single chunk.
+    assert len(chunks) == 1
+
+
+def test_heading_detection_ignores_table_cell_numbers():
+    text = "Table 3.457: Nakuru County Revenue Arrears. Row 2.6 debt management."
+    chunks = chunk_pages([_page_text(text)], chunk_size=50, overlap=0)
+    # "3.457" (single leading digit) and "2.6" are not section headings.
+    assert len(chunks) == 1

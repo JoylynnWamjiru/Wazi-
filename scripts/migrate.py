@@ -131,21 +131,49 @@ def migrate(dry_run: bool = False) -> dict:
                     "ALTER TABLE messages ADD COLUMN retrieved_chunks TEXT"
                 ))
 
-        # 5. Add full-text search column + GIN index for hybrid retrieval.
-        #    A generated column backfills existing rows automatically, so no
-        #    re-ingestion is needed after this migration.
+        # 5. Full-text search column + GIN index for hybrid retrieval.  Uses
+        #    the 'english' regconfig so query "stall" matches chunk "stalled"
+        #    (stemming) — 'simple' left those unmatched, which demoted chunks
+        #    that named the entity but used an inflected form.
         if not column_exists(session, "chunks", "fts"):
             report["actions"].append(
-                "ADD COLUMN chunks.fts tsvector (generated) + GIN index"
+                "ADD COLUMN chunks.fts tsvector (generated, english) + GIN index"
             )
             if not dry_run:
                 session.execute(text(
                     "ALTER TABLE chunks ADD COLUMN fts tsvector GENERATED ALWAYS "
-                    "AS (to_tsvector('simple'::regconfig, chunk_text)) STORED"
+                    "AS (to_tsvector('english'::regconfig, chunk_text)) STORED"
                 ))
                 session.execute(text(
                     "CREATE INDEX chunks_fts_gin ON chunks USING GIN (fts)"
                 ))
+        else:
+            # Upgrade path: earlier deployments created the column with
+            # 'simple'.  Rebuild it with 'english' in place — the column is
+            # STORED + generated, so dropping and re-adding backfills every
+            # row automatically (no re-ingestion needed).
+            row = session.execute(text(
+                "SELECT pg_get_expr(ad.adbin, ad.adrelid) AS expr "
+                "FROM pg_attrdef ad "
+                "JOIN pg_attribute a "
+                "  ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum "
+                "WHERE ad.adrelid = 'chunks'::regclass AND a.attname = 'fts'"
+            )).first()
+            expr = (row.expr if row else "") or ""
+            if "'simple'" in expr:
+                report["actions"].append(
+                    "REBUILD chunks.fts with 'english' regconfig (was 'simple')"
+                )
+                if not dry_run:
+                    session.execute(text("ALTER TABLE chunks DROP COLUMN fts"))
+                    session.execute(text(
+                        "ALTER TABLE chunks ADD COLUMN fts tsvector "
+                        "GENERATED ALWAYS "
+                        "AS (to_tsvector('english'::regconfig, chunk_text)) STORED"
+                    ))
+                    session.execute(text(
+                        "CREATE INDEX chunks_fts_gin ON chunks USING GIN (fts)"
+                    ))
 
         # 6. Denormalized dispute moderation signals.  Backfill existing rows
         #    from the (message_id, reporter) rows that already exist.
