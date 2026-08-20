@@ -11,6 +11,7 @@ LLM call in ``vfm.py``.
 
 from src.ingestion import retrieve_local
 from src.ingestion.retrieve import retrieve as retrieve_pgvector
+from src.ingestion.clarify import maybe_clarify
 from src.ingestion.generate import generate, parse_response
 from src.ingestion.translate import translate_query
 from src.ingestion.vfm import check_value_for_money
@@ -36,6 +37,25 @@ def _compose_retrieval_query(query: str, history: list[dict] | None) -> str:
     if not prior_user:
         return query
     return f"{prior_user[-1]} {query}".strip()
+
+
+# Retrieval below this vector similarity is "weak" — the answer probably
+# wasn't found, so a vague query is worth a clarifying question.  Cosine-like
+# (1 - L2 distance); confident matches are typically 0.4+.
+_CLARIFY_SIM_THRESHOLD = 0.32
+
+# Only ask for clarification when the query is short enough to be plausibly
+# vague.  A long, specific query that misses is almost certainly "not in the
+# corpus", so it goes straight to the friendly refusal.
+_CLARIFY_MAX_WORDS = 10
+
+
+def _retrieval_is_weak(chunks: list[dict]) -> bool:
+    """True if retrieval found nothing confidently relevant."""
+    if not chunks:
+        return True
+    best = max((c.get("similarity", 0.0) for c in chunks), default=0.0)
+    return best < _CLARIFY_SIM_THRESHOLD
 
 
 def _retrieve(query: str, k: int) -> list[dict]:
@@ -92,6 +112,27 @@ def get_response(query: str, history: list[dict] | None = None) -> dict:
         # k=8: the pending-bills answer lives in a chunk that ranks ~#8;
         # at k=4 it was a false negative. Verified on the old pipeline.
         chunks = _retrieve(retrieval_query, k=8)
+
+        # Weak retrieval on a short query is often a vague question rather
+        # than a missing answer.  Ask ONE clarifying question (in the citizen's
+        # register) instead of guessing or refusing; the follow-up is then
+        # resolved by the multi-turn context.  maybe_clarify returns None when
+        # the query is specific but simply not in the corpus, so the normal
+        # refusal path below still applies.
+        if _retrieval_is_weak(chunks) and len(query.split()) <= _CLARIFY_MAX_WORDS:
+            try:
+                clarifying = maybe_clarify(query, chunks, history)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[clarify] unavailable ({type(exc).__name__}), skipping")
+                clarifying = None
+            if clarifying:
+                return {
+                    "text": clarifying,
+                    "citation": "N/A",
+                    "last_updated": "N/A",
+                    "chunks": [],
+                }
+
         raw = generate(chunks, query, history=history)
         return parse_response(raw, chunks)
 
