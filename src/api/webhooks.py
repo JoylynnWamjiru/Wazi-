@@ -41,6 +41,7 @@ from src.api.middleware.identity import hash_wa_id
 from src.api.middleware.rate_limit import block_notice_limiter, webhook_limiter
 from src.shared.database import get_session
 from src.shared.language import detect_language
+from src.shared.messages import system_error
 from src.shared.models import Message, Session, User
 
 logger = logging.getLogger(__name__)
@@ -357,7 +358,7 @@ async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> Non
 
     except Exception:
         logger.exception("Pipeline failed for query: %s", query[:100])
-        reply = "Samahani, sina jibu la uhakika kwa swali hili sasa hivi."
+        reply = system_error(query)
 
     # Store the assistant's answer.
     with get_session() as session:

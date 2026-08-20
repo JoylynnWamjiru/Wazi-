@@ -70,7 +70,14 @@ DISPUTE_RETENTION_DAYS = int(os.getenv("DISPUTE_RETENTION_DAYS", "365"))
 # --- Fallback ---
 FALLBACK_ANSWERS = {
     "default": {
-        "text": "Samahani, sina jibu la uhakika kwa swali hili sasa hivi.",
+        # Last-resort reply for paths with no query string available.  The
+        # language-aware paths use src.shared.messages.system_error instead.
+        "text": (
+            "Samahani, mtandao wangu una shida kidogo kwa sasa. "
+            "Tafadhali jaribu tena baadaye!\n\n"
+            "Sorry, I'm having a little network trouble right now. "
+            "Please try again later!"
+        ),
         "citation": "N/A",
         "last_updated": "N/A",
     }

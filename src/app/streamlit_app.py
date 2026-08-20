@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.ingestion.pipeline import get_response
 from src.shared import config
+from src.shared.messages import system_error
 
 TRUSTED_SOURCES = [
     ("nakuru_audit_report.pdf", "Auditor-General's report, Nakuru County Executive, FY2023/24"),
@@ -190,7 +191,11 @@ def ask(query: str) -> None:
         with st.spinner("Wazi inatafuta jibu kwenye nyaraka rasmi..."):
             response = get_response(query)
     except Exception:  # noqa: BLE001 - defensive; pipeline already falls back internally
-        response = config.FALLBACK_ANSWERS["default"]
+        response = {
+            "text": system_error(query),
+            "citation": "N/A",
+            "last_updated": "N/A",
+        }
 
     st.session_state.messages.append({
         "role": "assistant",

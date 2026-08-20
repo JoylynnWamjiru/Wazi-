@@ -15,6 +15,7 @@ from src.ingestion.generate import generate, parse_response
 from src.ingestion.translate import translate_query
 from src.ingestion.vfm import check_value_for_money
 from src.shared import config
+from src.shared.messages import system_error
 
 
 def _retrieve(query: str, k: int) -> list[dict]:
@@ -72,9 +73,12 @@ def get_response(query: str) -> dict:
 
     except Exception as exc:  # noqa: BLE001
         print(f"[get_response] falling back: {type(exc).__name__}: {exc}")
-        fallback = dict(config.FALLBACK_ANSWERS["default"])
-        fallback["chunks"] = []
-        return fallback
+        return {
+            "text": system_error(query),
+            "citation": "N/A",
+            "last_updated": "N/A",
+            "chunks": [],
+        }
 
 
 # Backward-compat alias so Streamlit and webhook can import from here.
