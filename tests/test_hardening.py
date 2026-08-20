@@ -51,6 +51,44 @@ def test_generate_wraps_query_in_delimiters(monkeypatch):
     assert "Kaunti inapokea pesa ngapi?" in captured_content
 
 
+def test_generate_includes_conversation_history(monkeypatch):
+    """Multi-turn: prior turns are included in the prompt so a follow-up
+    question can be interpreted in context."""
+    import httpx
+
+    from src.ingestion.generate import generate
+
+    chunks = [{"source_id": 1, "page_number": 2, "chunk_text": "Kshs 148,902,024"}]
+    captured_content = None
+
+    def _fake_post(url, **kwargs):
+        nonlocal captured_content
+        captured_content = kwargs["json"]["messages"][1]["content"]
+
+        class FakeResp:
+            def raise_for_status(self): pass
+            def json(self):
+                return {"choices": [{"message": {"content": "Jibu. USED_CHUNK: 1"}}]}
+        return FakeResp()
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    import importlib
+    import src.shared.config
+    importlib.reload(src.shared.config)
+
+    history = [
+        {"role": "user", "text": "What about Njoro hospital?"},
+        {"role": "assistant", "text": "Ujenzi ulisimama."},
+    ]
+    generate(chunks, "how much did it cost?", history=history)
+
+    assert "CONVERSATION SO FAR:" in captured_content
+    assert "user: What about Njoro hospital?" in captured_content
+    assert "assistant: Ujenzi ulisimama." in captured_content
+    assert "how much did it cost?" in captured_content
+
+
 def test_parse_response_includes_retrieved_chunks():
     """parse_response propagates the retrieved chunks so the webhook can store
     the source-passage snapshot on the assistant message."""

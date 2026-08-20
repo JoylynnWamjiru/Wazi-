@@ -64,6 +64,9 @@ _REPORT_KEYWORDS = frozenset({
     "report",
 })
 
+# How many prior messages (user + assistant) to send as conversation context.
+_HISTORY_LIMIT = 6
+
 
 def _normalize(text: str) -> str:
     """Lowercase and collapse whitespace for keyword matching."""
@@ -189,6 +192,23 @@ async def incoming_message(request: Request, background: BackgroundTasks):
         session.flush()
         message_id = user_msg.id
 
+        # Recent conversation for multi-turn context (the message just stored
+        # is excluded — it is passed separately as the query).
+        history_rows = (
+            session.query(Message)
+            .filter(
+                Message.session_id == active_session.id,
+                Message.id < message_id,
+                Message.role.in_(("user", "assistant")),
+            )
+            .order_by(Message.id.desc())
+            .limit(_HISTORY_LIMIT)
+            .all()
+        )
+        history = [
+            {"role": m.role, "text": m.text} for m in reversed(history_rows)
+        ]
+
         # A report targets the citizen's most recent assistant answer in
         # this session.
         last_answer = (
@@ -254,6 +274,7 @@ async def incoming_message(request: Request, background: BackgroundTasks):
         raw_phone=raw_wa_id,
         message_id=message_id,
         query=message_text,
+        history=history,
     )
 
     return Response(status_code=200)
@@ -335,7 +356,12 @@ def _handle_report(
     return no_recent
 
 
-async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> None:
+async def _process_and_reply(
+    raw_phone: str,
+    message_id: int,
+    query: str,
+    history: list[dict] | None = None,
+) -> None:
     """Run the RAG pipeline in a thread pool and send the answer.
 
     The pipeline (FAISS/pgvector search + DeepSeek HTTP call) is
@@ -349,7 +375,7 @@ async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> Non
     answer = None
     try:
         # Offload the blocking pipeline to a thread pool.
-        answer = await asyncio.to_thread(_run_pipeline, query)
+        answer = await asyncio.to_thread(_run_pipeline, query, history)
         reply = answer["text"]
         citation = answer.get("citation", "N/A")
 
@@ -393,7 +419,7 @@ async def _process_and_reply(raw_phone: str, message_id: int, query: str) -> Non
     await send_whatsapp(phone=raw_phone, message=reply)
 
 
-def _run_pipeline(query: str) -> dict:
+def _run_pipeline(query: str, history: list[dict] | None = None) -> dict:
     """Synchronous wrapper around the RAG pipeline.
 
     Runs in a thread pool via ``asyncio.to_thread()`` so the event loop
@@ -401,4 +427,4 @@ def _run_pipeline(query: str) -> dict:
     entry point that ties pgvector retrieval + DeepSeek generation.
     """
     from src.ingestion.orchestrate import get_response
-    return get_response(query)
+    return get_response(query, history=history)

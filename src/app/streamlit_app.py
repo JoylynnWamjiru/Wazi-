@@ -27,6 +27,9 @@ TRUSTED_SOURCES = [
 ]
 DISPUTE_THRESHOLD = 3
 
+# How many prior messages to send as conversation context (multi-turn).
+_HISTORY_LIMIT = 6
+
 EXAMPLE_QUESTIONS = [
     "Kaunti ya Nakuru inapokea pesa ngapi kutoka kwa Serikali ya Kitaifa?",
     "Je, mradi wa Keringet ulikuwa na thamani ya pesa iliyotumika?",
@@ -184,12 +187,16 @@ def render_user(message: dict) -> None:
 
 def ask(query: str) -> None:
     """Append the user question, get a grounded answer, append the reply."""
+    history = [
+        {"role": m["role"], "text": m["text"]}
+        for m in st.session_state.messages[-_HISTORY_LIMIT:]
+    ]
     st.session_state.messages.append({"role": "user", "text": query})
 
     # UI-level guard: even an unexpected error shows the fallback, never a traceback.
     try:
         with st.spinner("Wazi inatafuta jibu kwenye nyaraka rasmi..."):
-            response = get_response(query)
+            response = get_response(query, history=history)
     except Exception:  # noqa: BLE001 - defensive; pipeline already falls back internally
         response = {
             "text": system_error(query),
