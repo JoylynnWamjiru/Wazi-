@@ -12,6 +12,7 @@ LLM call in ``vfm.py``.
 from src.ingestion import retrieve_local
 from src.ingestion.retrieve import retrieve as retrieve_pgvector
 from src.ingestion.generate import generate, parse_response
+from src.ingestion.translate import translate_query
 from src.ingestion.vfm import check_value_for_money
 from src.shared import config
 
@@ -56,9 +57,16 @@ def get_response(query: str) -> dict:
         if vfm is not None:
             return vfm
 
+        # Translate Swahili/Sheng queries to English for retrieval.  The
+        # corpus is 100% English, so the retrieval string should be too — a
+        # better match here is the difference between a grounded answer and
+        # "sina taarifa".  The ORIGINAL query is still passed to generate()
+        # so the answer matches the citizen's register.
+        retrieval_query = translate_query(query)
+
         # k=8: the pending-bills answer lives in a chunk that ranks ~#8;
         # at k=4 it was a false negative. Verified on the old pipeline.
-        chunks = _retrieve(query, k=8)
+        chunks = _retrieve(retrieval_query, k=8)
         raw = generate(chunks, query)
         return parse_response(raw, chunks)
 
