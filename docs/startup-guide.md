@@ -144,6 +144,51 @@ Already done via `scripts/vps_setup.sh`. This installed:
 - 2 GB swap (VPS has only 1 GB RAM)
 - PostgreSQL tuned for low RAM: `shared_buffers=128MB`
 
+### Landing page (wazi.aibuildathon.dev root)
+
+The static splash page lives in the repo at `web/splash/index.html` and is
+served by Nginx at the exact root `/` — everything else (`/health`, `/api/*`,
+`/whatsapp/*`, `/docs`) still proxies to uvicorn on `:8000`.
+
+The Nginx site config is `/etc/nginx/sites-available/wazi` (symlinked from
+`sites-enabled`). The 443 server block needs an exact-match `location = /`:
+
+```nginx
+server {
+   server_name wazi.aibuildathon.dev 157.230.232.223;
+
+    location = / {
+        root /opt/wazi/web/splash;
+        try_files /index.html =404;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    listen 443 ssl; # managed by Certbot
+    # ... existing cert lines unchanged ...
+}
+```
+
+To (re)apply it:
+
+```bash
+cd /opt/wazi && git pull origin main        # file lands at /opt/wazi/web/splash/index.html
+# edit /etc/nginx/sites-available/wazi with the block above
+nginx -t                                   # must pass
+systemctl reload nginx
+curl -s -o /dev/null -w "%{http_code}" https://wazi.aibuildathon.dev/          # 200
+curl -s https://wazi.aibuildathon.dev/health                                    # {"status":"healthy"}
+```
+
+Gotcha: use `try_files /index.html =404;` — NOT `index index.html;`. The
+`index` directive did not serve inside the exact-match `location = /`, so `/`
+fell through to the proxy and FastAPI returned `{"detail":"Not Found"}`.
+
 ### Full VPS startup sequence
 
 Bring the production stack up (cold start or after a deploy), end to end:
@@ -163,7 +208,7 @@ systemctl is-active wazi                    # -> active
 
 # 4. Health checks (internal uvicorn, then public via Nginx)
 curl http://localhost:8000/health
-curl http://157.230.232.223/health          # -> {"status":"healthy"}
+curl https://wazi.aibuildathon.dev/health          # -> {"status":"healthy"}
 
 # 5. Seed sources if the registry is empty (both idempotent)
 venv/bin/python scripts/migrate.py          # enum values, content_hash column
